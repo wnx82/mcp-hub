@@ -185,6 +185,70 @@ class CoreHelperTests(unittest.TestCase):
                 self.assertEqual("example", always[0]["name"])
                 self.assertEqual([], intermittent)
 
+    def test_notion_rollback_only_restores_requested_writable_fields(self) -> None:
+        current = {
+            "archived": False,
+            "properties": {
+                "Name": {
+                    "type": "title",
+                    "title": [{"type": "text", "text": {"content": "before"}}],
+                },
+                "Computed": {"type": "formula", "formula": {"number": 2}},
+            },
+        }
+        rollback = server._notion_rollback_body(
+            current,
+            {
+                "archived": True,
+                "properties": {
+                    "Name": {"title": [{"text": {"content": "after"}}]},
+                },
+            },
+        )
+        self.assertFalse(rollback["archived"])
+        self.assertEqual(
+            current["properties"]["Name"]["title"],
+            rollback["properties"]["Name"]["title"],
+        )
+        self.assertNotIn("Computed", rollback["properties"])
+
+    def test_notion_rollback_refuses_read_only_property_types(self) -> None:
+        rollback = server._notion_rollback_body(
+            {
+                "properties": {
+                    "Computed": {"type": "formula", "formula": {"number": 2}},
+                }
+            },
+            {"properties": {"Computed": {"formula": {"number": 3}}}},
+        )
+        self.assertIn("cannot be snapshotted safely", rollback["error"])
+
+    def test_rollback_change_consumes_snapshot_once(self) -> None:
+        from core.snapshots import SnapshotStore
+
+        with tempfile.TemporaryDirectory() as directory:
+            store = SnapshotStore(Path(directory) / "state.db")
+            change_id = store.create(
+                profile="internal",
+                tool="notion_archive_page",
+                target="notion:page:example",
+                state={"page_id": "example", "body": {"archived": False}},
+            )
+            with (
+                mock.patch.object(server, "_snapshot_store", store),
+                mock.patch.object(
+                    server,
+                    "_apply_snapshot",
+                    new=mock.AsyncMock(return_value={"archived": False}),
+                ) as apply_snapshot,
+            ):
+                result = asyncio.run(server.rollback_change.__wrapped__(change_id))
+                replay = asyncio.run(server.rollback_change.__wrapped__(change_id))
+
+        self.assertEqual("rolled_back", result["status"])
+        self.assertIn("not rollback-ready", replay["error"])
+        apply_snapshot.assert_awaited_once()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -42,6 +42,8 @@ Fixed / Security.
   profile, tool, host, result status, and duration without storing full payloads.
 - A central resource limiter now enforces per-token request quotas, argument
   size bounds, per-target concurrency, mutation cooldowns, and circuit breakers.
+- `rollback_change` restores one profile-bound snapshot for Cloudflare tunnel
+  configuration, supported Notion page fields, or bounded LXC file writes.
 
 ### Changed
 
@@ -70,6 +72,8 @@ Fixed / Security.
   `MCP_AUTH_TOKEN` remains an unrestricted admin token for compatibility, and
   the global read-only switch still overrides every profile.
 - Runaway calls are contained by configurable in-process resource guards.
+- Reversible mutations now capture prior state in a mode-`0600`, retained
+  SQLite store and refuse changes that cannot be snapshotted safely.
 
 ## [0.2.0] - 2026-07-28
 

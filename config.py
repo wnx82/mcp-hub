@@ -141,6 +141,8 @@ MAX_CONCURRENT_PER_HOST = env_int("MCP_MAX_CONCURRENT_PER_HOST", 4)
 CIRCUIT_FAILURES = env_int("MCP_CIRCUIT_FAILURES", 3)
 CIRCUIT_RESET_SECONDS = env_int("MCP_CIRCUIT_RESET_SECONDS", 60)
 MUTATION_COOLDOWN_SECONDS = env_int("MCP_MUTATION_COOLDOWN_SECONDS", 1)
+SNAPSHOT_MAX_BYTES = env_int("MCP_SNAPSHOT_MAX_BYTES", 65_536)
+SNAPSHOT_RETENTION_DAYS = env_int("MCP_SNAPSHOT_RETENTION_DAYS", 7)
 
 # Tools blocked by READ_ONLY. Anything that executes code, changes state on a
 # host, or writes to a third-party API.
@@ -149,7 +151,7 @@ MUTATING_TOOLS = frozenset({
     "local_exec", "remote_exec", "fleet_exec", "batch_exec",
     "ct_exec", "ct_write_file", "proxmox_ct_exec", "docker_exec",
     "service_ctl", "job_run", "destroy_resource", "wake_host",
-    "ssh_reset_control", "confirm_mutation",
+    "ssh_reset_control", "confirm_mutation", "rollback_change",
     # cloudflare
     "cloudflare_api", "cloudflare_dns_create", "cloudflare_dns_delete",
     "cloudflare_tunnel_config_update",
@@ -184,6 +186,7 @@ CONFIRMATION_TOOLS = frozenset({
     "notion_archive_page",
     "notion_delete_block",
     "service_ctl",
+    "rollback_change",
 })
 
 # =============================================================================

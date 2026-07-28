@@ -91,6 +91,20 @@ These controls reduce accidental loops and contain individual clients. They
 reset when the process restarts and do not replace reverse-proxy rate limits,
 systemd resource controls, or host-level isolation.
 
+## Mutation snapshots
+
+`cloudflare_tunnel_config_update`, `notion_update_page`,
+`notion_archive_page`, and `ct_write_file` capture bounded prior state before
+changing it. Successful calls return a `change_id`; `rollback_change` restores
+that snapshot once through the normal confirmation flow.
+
+Snapshots are profile-bound, retained in `state.db` for seven days by default,
+and file snapshots are limited to 64 KiB by default. Because snapshots can
+contain prior file or service configuration, `state.db` is forced to mode
+`0600` and must be backed up and handled as sensitive data. Unsupported Notion
+properties, oversized files, symlinks, and non-regular files are refused rather
+than advertised as reversible.
+
 ## Reporting a vulnerability
 
 Please report security issues privately — do **not** open a public issue.

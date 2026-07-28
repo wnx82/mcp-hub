@@ -35,6 +35,7 @@ from mcp.types import ToolAnnotations
 import config
 from _version import __version__
 from core.limits import LimitLease, ResourceLimiter
+from core.snapshots import SnapshotStore
 from tools.inventory import list_hosts as list_hosts_tool
 
 # --- Config (see config.py / .env.example) ---
@@ -173,6 +174,7 @@ def _init_db() -> None:
     con.isolation_level = None
     con.execute("VACUUM")
     con.close()
+    os.chmod(STATE_DB, 0o600)
     if purged > 0:
         log.info(f"state.db: {purged} anciennes entrees purgees (retention 30j)")
 
@@ -382,6 +384,10 @@ async def _with_tool(name: str, coro):
 
 # --- FastMCP setup ---
 _init_db()
+_snapshot_store = SnapshotStore(
+    STATE_DB,
+    retention_days=config.SNAPSHOT_RETENTION_DAYS,
+)
 
 mcp = FastMCP(
     name="mcp-hub",
@@ -892,8 +898,25 @@ async def cloudflare_tunnel_config_get(tunnel_id: str) -> dict[str, Any]:
 
 @mcp.tool()
 async def cloudflare_tunnel_config_update(tunnel_id: str, ingress: list[dict]) -> dict[str, Any]:
-    """Replace all ingress rules for a Cloudflare tunnel. Always read the current configuration first with cloudflare_tunnel_config_get."""
-    return await _with_tool(
+    """Replace tunnel ingress rules after capturing a reversible snapshot."""
+    current = await _cf_api(
+        "GET",
+        f"/accounts/{CF_ACCOUNT_ID}/cfd_tunnel/{tunnel_id}/configurations",
+    )
+    if not current.get("success"):
+        return {"error": "cannot snapshot current Cloudflare configuration", "detail": current}
+    current_config = (
+        ((current.get("data") or {}).get("result") or {}).get("config")
+    )
+    if not isinstance(current_config, dict):
+        return {"error": "Cloudflare returned no snapshot-compatible configuration"}
+    change_id = _snapshot_store.create(
+        profile=_profile_identity(_current_profile.get()),
+        tool="cloudflare_tunnel_config_update",
+        target=f"cloudflare:tunnel:{tunnel_id}",
+        state={"tunnel_id": tunnel_id, "config": current_config},
+    )
+    result = await _with_tool(
         "cloudflare_tunnel_config_update",
         _cf_api(
             "PUT",
@@ -901,6 +924,11 @@ async def cloudflare_tunnel_config_update(tunnel_id: str, ingress: list[dict]) -
             json_body={"config": {"ingress": ingress}},
         ),
     )
+    if not result.get("success"):
+        _snapshot_store.set_status(change_id, "mutation_failed")
+        return result
+    result["change_id"] = change_id
+    return result
 
 
 @mcp.tool()
@@ -1530,6 +1558,49 @@ async def notion_create_page(
     return await _notion_request("POST", "/pages", json_body=body)
 
 
+_NOTION_WRITABLE_PROPERTY_TYPES = frozenset({
+    "checkbox",
+    "date",
+    "email",
+    "files",
+    "multi_select",
+    "number",
+    "people",
+    "phone_number",
+    "relation",
+    "rich_text",
+    "select",
+    "status",
+    "title",
+    "url",
+})
+
+
+def _notion_rollback_body(current: dict[str, Any], requested: dict[str, Any]) -> dict[str, Any]:
+    """Build a Notion PATCH body containing only reversible requested fields."""
+    rollback: dict[str, Any] = {}
+    for field in ("archived", "icon", "cover"):
+        if field in requested:
+            rollback[field] = current.get(field)
+    if "properties" not in requested:
+        return rollback
+    current_properties = current.get("properties") or {}
+    restored_properties: dict[str, Any] = {}
+    for name in requested["properties"]:
+        value = current_properties.get(name)
+        property_type = value.get("type") if isinstance(value, dict) else None
+        if property_type not in _NOTION_WRITABLE_PROPERTY_TYPES:
+            return {
+                "error": (
+                    f"Notion property {name!r} cannot be snapshotted safely "
+                    f"(type={property_type!r})"
+                )
+            }
+        restored_properties[name] = {property_type: value.get(property_type)}
+    rollback["properties"] = restored_properties
+    return rollback
+
+
 @mcp.tool()
 async def notion_update_page(
     page_id: str,
@@ -1538,7 +1609,7 @@ async def notion_update_page(
     icon: Optional[dict] = None,
     cover: Optional[dict] = None,
 ) -> dict[str, Any]:
-    """Update a Notion page's properties, icon, cover, or archive state."""
+    """Update a Notion page after snapshotting the fields being changed."""
     body: dict[str, Any] = {}
     if properties is not None:
         body["properties"] = properties
@@ -1550,13 +1621,44 @@ async def notion_update_page(
         body["cover"] = cover
     if not body:
         return {"error": "aucun champ a modifier - passer au moins un de properties/archived/icon/cover"}
-    return await _notion_request("PATCH", f"/pages/{page_id}", json_body=body)
+    current = await _notion_request("GET", f"/pages/{page_id}")
+    if "error" in current:
+        return {"error": "cannot snapshot current Notion page", "detail": current}
+    rollback_body = _notion_rollback_body(current, body)
+    if "error" in rollback_body:
+        return rollback_body
+    change_id = _snapshot_store.create(
+        profile=_profile_identity(_current_profile.get()),
+        tool="notion_update_page",
+        target=f"notion:page:{page_id}",
+        state={"page_id": page_id, "body": rollback_body},
+    )
+    result = await _notion_request("PATCH", f"/pages/{page_id}", json_body=body)
+    if "error" in result:
+        _snapshot_store.set_status(change_id, "mutation_failed")
+        return result
+    result["change_id"] = change_id
+    return result
 
 
 @mcp.tool()
 async def notion_archive_page(page_id: str) -> dict[str, Any]:
     """Move a Notion page to the trash using a reversible archive operation."""
-    return await _notion_request("PATCH", f"/pages/{page_id}", json_body={"archived": True})
+    current = await _notion_request("GET", f"/pages/{page_id}")
+    if "error" in current:
+        return {"error": "cannot snapshot current Notion page", "detail": current}
+    change_id = _snapshot_store.create(
+        profile=_profile_identity(_current_profile.get()),
+        tool="notion_archive_page",
+        target=f"notion:page:{page_id}",
+        state={"page_id": page_id, "body": {"archived": bool(current.get("archived"))}},
+    )
+    result = await _notion_request("PATCH", f"/pages/{page_id}", json_body={"archived": True})
+    if "error" in result:
+        _snapshot_store.set_status(change_id, "mutation_failed")
+        return result
+    result["change_id"] = change_id
+    return result
 
 
 @mcp.tool()
@@ -2901,7 +3003,61 @@ async def ct_write_file(
     mode: Optional[str] = None,
     make_parents: bool = True,
 ) -> dict[str, Any]:
-    """Write base64-encoded content to a file inside an LXC container."""
+    """Write a file inside an LXC container after capturing its prior state."""
+    quoted_path = _shlex.quote(path)
+    snapshot_script = (
+        f"if [ -L {quoted_path} ]; then\n"
+        "  echo TYPE=symlink\n"
+        f"elif [ ! -e {quoted_path} ]; then\n"
+        "  echo TYPE=missing\n"
+        f"elif [ ! -f {quoted_path} ]; then\n"
+        "  echo TYPE=unsupported\n"
+        "else\n"
+        f"  size=$(wc -c < {quoted_path})\n"
+        f"  mode=$(stat -c %a {quoted_path})\n"
+        "  echo TYPE=file\n"
+        "  echo SIZE=$size\n"
+        "  echo MODE=$mode\n"
+        f"  if [ \"$size\" -le {max(1, config.SNAPSHOT_MAX_BYTES)} ]; then\n"
+        f"    base64 -w0 {quoted_path}; echo\n"
+        "  fi\n"
+        "fi"
+    )
+    snapshot_result = await _ssh_run(
+        host,
+        _ct_run_cmd(ctid, snapshot_script),
+        as_root=True,
+        timeout=30,
+    )
+    if snapshot_result.get("return_code") != 0:
+        return {"error": "cannot snapshot target file", "detail": snapshot_result}
+    lines = (snapshot_result.get("stdout") or "").splitlines()
+    snapshot_type = lines[0].partition("=")[2] if lines else ""
+    if snapshot_type in {"symlink", "unsupported", ""}:
+        return {"error": f"refused: snapshot does not support target type {snapshot_type!r}"}
+    state: dict[str, Any] = {
+        "host": host,
+        "ctid": ctid,
+        "path": path,
+        "exists": snapshot_type == "file",
+    }
+    if snapshot_type == "file":
+        metadata = dict(line.split("=", 1) for line in lines[1:3] if "=" in line)
+        size = int(metadata.get("SIZE", config.SNAPSHOT_MAX_BYTES + 1))
+        if size > config.SNAPSHOT_MAX_BYTES or len(lines) < 4:
+            return {
+                "error": (
+                    f"refused: existing file exceeds snapshot limit "
+                    f"({size} > {config.SNAPSHOT_MAX_BYTES} bytes)"
+                )
+            }
+        state.update({"mode": metadata.get("MODE", "600"), "content_b64": lines[3]})
+    change_id = _snapshot_store.create(
+        profile=_profile_identity(_current_profile.get()),
+        tool="ct_write_file",
+        target=f"{host}:ct:{ctid}:{path}",
+        state=state,
+    )
     parent = os.path.dirname(path) or "/"
     parts = []
     if make_parents:
@@ -2917,6 +3073,10 @@ async def ct_write_file(
     )
     res["path"] = path
     res["bytes_intended"] = len(content.encode())
+    if res.get("return_code") != 0:
+        _snapshot_store.set_status(change_id, "mutation_failed")
+    else:
+        res["change_id"] = change_id
     return res
 
 
@@ -3445,6 +3605,89 @@ def _redacted_preview(value: Any, key: str = "") -> Any:
     if isinstance(value, str):
         return redact_str(value)
     return value
+
+
+async def _apply_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    state = snapshot["state"]
+    tool = snapshot["tool"]
+    if tool == "cloudflare_tunnel_config_update":
+        return await _cf_api(
+            "PUT",
+            f"/accounts/{CF_ACCOUNT_ID}/cfd_tunnel/{state['tunnel_id']}/configurations",
+            json_body={"config": state["config"]},
+        )
+    if tool in {"notion_update_page", "notion_archive_page"}:
+        return await _notion_request(
+            "PATCH",
+            f"/pages/{state['page_id']}",
+            json_body=state["body"],
+        )
+    if tool == "ct_write_file":
+        path = _shlex.quote(state["path"])
+        if state["exists"]:
+            mode = str(state["mode"])
+            if not re.fullmatch(r"[0-7]{3,4}", mode):
+                return {"error": "snapshot contains an invalid file mode"}
+            script = (
+                f"echo {_shlex.quote(state['content_b64'])} | base64 -d > {path}\n"
+                f"chmod {mode} {path}"
+            )
+        else:
+            script = f"rm -f -- {path}"
+        return await _ssh_run(
+            state["host"],
+            _ct_run_cmd(int(state["ctid"]), script),
+            as_root=True,
+            timeout=30,
+        )
+    return {"error": f"unsupported snapshot tool: {tool}"}
+
+
+def _rollback_succeeded(tool: str, result: dict[str, Any]) -> bool:
+    if "error" in result:
+        return False
+    if tool == "cloudflare_tunnel_config_update":
+        return bool(result.get("success"))
+    if tool == "ct_write_file":
+        return result.get("return_code") == 0
+    return True
+
+
+@mcp.tool()
+async def rollback_change(change_id: str) -> dict[str, Any]:
+    """Restore one ready mutation snapshot once, after normal mutation confirmation."""
+    snapshot = _snapshot_store.get(change_id)
+    if snapshot is None:
+        return {"error": "unknown or expired change_id"}
+    if snapshot["status"] != "ready":
+        return {
+            "error": f"snapshot is not rollback-ready (status={snapshot['status']})",
+            "change_id": change_id,
+        }
+    profile = _current_profile.get()
+    identity = _profile_identity(profile)
+    if snapshot["profile"] != identity and (profile or {}).get("level") != "admin":
+        return {"error": "snapshot belongs to a different access profile"}
+    result = await _apply_snapshot(snapshot)
+    succeeded = _rollback_succeeded(snapshot["tool"], result)
+    _snapshot_store.set_status(
+        change_id,
+        "rolled_back" if succeeded else "rollback_failed",
+    )
+    if not succeeded:
+        return {
+            "error": "rollback failed",
+            "change_id": change_id,
+            "original_tool": snapshot["tool"],
+            "result": result,
+        }
+    return {
+        "status": "rolled_back",
+        "change_id": change_id,
+        "original_tool": snapshot["tool"],
+        "target": snapshot["target"],
+        "result": result,
+    }
 
 
 @mcp.tool()
