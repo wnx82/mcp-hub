@@ -111,13 +111,15 @@ class CoreHelperTests(unittest.TestCase):
                     {"value": "expected", "api_token": "must-not-leak"},
                 )
             )
-            token = plan["confirmation_token"]
-            self.assertEqual("[REDACTED]", plan["arguments_preview"]["api_token"])
+            token = plan["data"]["confirmation_token"]
+            self.assertEqual(
+                "[REDACTED]", plan["data"]["arguments_preview"]["api_token"]
+            )
             result = asyncio.run(server.confirm_mutation(token))
             replay = asyncio.run(server.confirm_mutation(token))
 
         self.assertEqual(["expected"], calls)
-        self.assertEqual("executed", result["status"])
+        self.assertEqual("executed", result["data"]["status"])
         self.assertIn("already used", replay["error"])
 
     def test_direct_sensitive_mutation_is_refused_before_execution(self) -> None:
@@ -129,6 +131,16 @@ class CoreHelperTests(unittest.TestCase):
                 server.service_ctl("example", "restart", host=None)
             )
         self.assertIn("confirmation plan", result["error"])
+
+    def test_tool_response_has_common_envelope(self) -> None:
+        result = asyncio.run(server.list_hosts())
+        self.assertEqual(
+            {"ok", "data", "error", "duration_ms", "host", "request_id", "tool"},
+            set(result),
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual("list_hosts", result["tool"])
+        self.assertEqual(24, len(result["request_id"]))
 
     def test_yaml_inventory_loaders(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

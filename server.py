@@ -68,6 +68,9 @@ _current_profile: contextvars.ContextVar[dict[str, Any] | None] = contextvars.Co
 _confirmed_mutation: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "confirmed_mutation", default=False
 )
+_current_request_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "request_id", default=None
+)
 _mutating_functions: dict[str, Any] = {}
 _pending_mutations: dict[str, dict[str, Any]] = {}
 
@@ -453,6 +456,34 @@ def _access_refusal(profile, fn, args, kwargs) -> dict[str, Any] | None:
     return None
 
 
+def _response_envelope(
+    tool: str,
+    result: Any,
+    started: float,
+    request_id: str,
+    fn,
+    args,
+    kwargs,
+) -> dict[str, Any]:
+    error = result.get("error") if isinstance(result, dict) else None
+    host = result.get("host") if isinstance(result, dict) else None
+    if host is None:
+        try:
+            bound = inspect.signature(fn).bind_partial(*args, **kwargs)
+            host = bound.arguments.get("host")
+        except TypeError:
+            host = None
+    return {
+        "ok": error is None,
+        "data": result,
+        "error": str(error) if error is not None else None,
+        "duration_ms": int((time.monotonic() - started) * 1000),
+        "host": host,
+        "request_id": request_id,
+        "tool": tool,
+    }
+
+
 def _guarded_tool(*d_args, **d_kwargs):
     def wrapper(fn):
         if fn.__name__ in config.MUTATING_TOOLS and fn.__name__ != "confirm_mutation":
@@ -460,31 +491,43 @@ def _guarded_tool(*d_args, **d_kwargs):
 
         @functools.wraps(fn)
         async def guarded(*args, **kwargs):
-            if config.READ_ONLY and fn.__name__ in config.MUTATING_TOOLS:
-                return {
-                    "error": "refused: MCP Hub is in read-only mode",
-                    "tool": fn.__name__,
-                    "hint": "set MCP_READ_ONLY=false in .env to enable mutating tools",
-                }
-            profile = _current_profile.get()
-            refusal = _access_refusal(profile, fn, args, kwargs)
-            if refusal:
-                return refusal
-            requires_confirmation = (
-                config.CONFIRMATION_MODE == "all"
-                or (
-                    config.CONFIRMATION_MODE == "sensitive"
-                    and fn.__name__ in config.CONFIRMATION_TOOLS
+            started = time.monotonic()
+            request_id = _current_request_id.get() or secrets.token_hex(12)
+            request_token = _current_request_id.set(request_id)
+            try:
+                if config.READ_ONLY and fn.__name__ in config.MUTATING_TOOLS:
+                    result = {
+                        "error": "refused: MCP Hub is in read-only mode",
+                        "hint": "set MCP_READ_ONLY=false in .env to enable mutating tools",
+                    }
+                else:
+                    profile = _current_profile.get()
+                    result = _access_refusal(profile, fn, args, kwargs)
+                    requires_confirmation = (
+                        config.CONFIRMATION_MODE == "all"
+                        or (
+                            config.CONFIRMATION_MODE == "sensitive"
+                            and fn.__name__ in config.CONFIRMATION_TOOLS
+                        )
+                    )
+                    if result is None and requires_confirmation and not _confirmed_mutation.get():
+                        result = {
+                            "error": "refused: mutation requires a confirmation plan",
+                            "hint": "call plan_mutation, then confirm_mutation",
+                        }
+                    if result is None:
+                        try:
+                            result = fn(*args, **kwargs)
+                            if inspect.isawaitable(result):
+                                result = await result
+                        except Exception as exc:
+                            log.exception("tool %s failed (request_id=%s)", fn.__name__, request_id)
+                            result = {"error": str(exc)}
+                return _response_envelope(
+                    fn.__name__, result, started, request_id, fn, args, kwargs
                 )
-            )
-            if requires_confirmation and not _confirmed_mutation.get():
-                return {
-                    "error": "refused: mutation requires a confirmation plan",
-                    "tool": fn.__name__,
-                    "hint": "call plan_mutation with this tool and its arguments, then confirm_mutation",
-                }
-            result = fn(*args, **kwargs)
-            return await result if inspect.isawaitable(result) else result
+            finally:
+                _current_request_id.reset(request_token)
 
         tool_kwargs = dict(d_kwargs)
         if "annotations" not in tool_kwargs:

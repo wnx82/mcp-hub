@@ -51,6 +51,8 @@ Fixed / Security.
   systemd deployment modes and documents their operational responsibilities.
 - The contribution guide now defines how compatible dependency ranges and
   reproducible deployment pins must be maintained together.
+- All MCP tool results now use a common `ok`, `data`, `error`, `duration_ms`,
+  `host`, `request_id`, and `tool` envelope, including security refusals.
 
 ### Fixed
 

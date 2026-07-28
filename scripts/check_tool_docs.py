@@ -25,7 +25,10 @@ def main() -> int:
     if not separator:
         raise SystemExit("README tool reference has no closing 'Security' section")
 
-    documented = set(re.findall(r"`([a-z][a-z0-9_]*)`", section))
+    table = "\n".join(
+        line for line in section.splitlines() if line.lstrip().startswith("|")
+    )
+    documented = set(re.findall(r"`([a-z][a-z0-9_]*)`", table))
     registered = {tool.name for tool in asyncio.run(server.mcp.list_tools())}
     missing = sorted(registered - documented)
     unknown = sorted(documented - registered)

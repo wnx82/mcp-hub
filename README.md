@@ -169,6 +169,24 @@ Tags are how you address groups: `fleet_exec(tag="backup", command="df -h")`.
 
 <!-- TODO: expand each group into a table with signatures -->
 
+Every tool returns the same top-level envelope:
+
+```json
+{
+  "ok": true,
+  "data": {},
+  "error": null,
+  "duration_ms": 12,
+  "host": "example",
+  "request_id": "4d52b1f69b974b7784bf65dd",
+  "tool": "system_info"
+}
+```
+
+`data` contains the tool-specific payload. Security refusals and controlled
+exceptions use the same shape with `ok: false`, making chained calls and audit
+correlation predictable.
+
 | Group | Tools |
 |---|---|
 | **Fleet & shell** | `list_hosts` `topology` `system_info` `remote_exec` `local_exec` `fleet_exec` `batch_exec` `read_file` `service_ctl` `journal_query` `apt_status` `ssh_reset_control` `wake_host` `dhcp_reservations` `endpoints_health` `infra_snapshot` `destroy_resource` |
