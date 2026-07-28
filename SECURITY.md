@@ -35,10 +35,11 @@ unauthenticated root shell on your entire fleet**. Deploy it accordingly.
   prevents that.
 - A token explicitly configured with `level: admin`. Access profiles can reduce
   a token's tools and target hosts, but they do not sandbox an allowed command.
-- Malicious operators. There is no multi-user model, no per-tool ACL, no audit
-  trail you could defend in a post-mortem beyond `state.db` and the journal.
+- Malicious operators. Access profiles and the SQLite audit trail improve
+  attribution, but they do not sandbox commands an operator is allowed to run.
 - Host-to-host lateral movement. The hub's SSH key reaches every host.
-- Denial of service, resource exhaustion, or runaway loops from the model.
+- Distributed denial of service or exhaustion outside this process. The
+  in-process guards are not a replacement for proxy and systemd limits.
 
 ## Deploying it without regret
 
@@ -74,6 +75,21 @@ destructive tools; `admin` can call every explicitly allowed tool.
 `MCP_READ_ONLY=true` remains the global kill switch and overrides every
 profile. The legacy `MCP_AUTH_TOKEN`, when configured, is treated as an
 unrestricted admin profile for backward compatibility.
+
+## Resource guards
+
+Every tool call passes through central in-process guards before execution:
+
+- `MCP_RATE_LIMIT_PER_MINUTE` bounds calls per authenticated token identity.
+- `MCP_MAX_ARGUMENT_BYTES` rejects oversized serialized arguments.
+- `MCP_MAX_CONCURRENT_PER_HOST` bounds simultaneous calls to each target.
+- `MCP_CIRCUIT_FAILURES` and `MCP_CIRCUIT_RESET_SECONDS` stop repeated calls
+  to a failing target before automatically allowing a retry.
+- `MCP_MUTATION_COOLDOWN_SECONDS` spaces mutating calls to the same target.
+
+These controls reduce accidental loops and contain individual clients. They
+reset when the process restarts and do not replace reverse-proxy rate limits,
+systemd resource controls, or host-level isolation.
 
 ## Reporting a vulnerability
 

@@ -40,6 +40,8 @@ Fixed / Security.
   `idempotentHint`, and `openWorldHint` behavior annotations.
 - `audit_export` exposes a bounded 30-day audit trail correlated by request,
   profile, tool, host, result status, and duration without storing full payloads.
+- A central resource limiter now enforces per-token request quotas, argument
+  size bounds, per-target concurrency, mutation cooldowns, and circuit breakers.
 
 ### Changed
 
@@ -67,6 +69,7 @@ Fixed / Security.
   `admin` levels with tool, host, and tag restrictions. The legacy
   `MCP_AUTH_TOKEN` remains an unrestricted admin token for compatibility, and
   the global read-only switch still overrides every profile.
+- Runaway calls are contained by configurable in-process resource guards.
 
 ## [0.2.0] - 2026-07-28
 

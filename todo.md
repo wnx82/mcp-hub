@@ -24,7 +24,7 @@
 - [x] Ajouter les annotations MCP de comportement (`readOnlyHint`, `destructiveHint`, `idempotentHint`) afin que le client distingue les consultations des operations risquees
 - [x] Uniformiser les reponses des tools avec une enveloppe commune (`ok`, `data`, `error`, `duration_ms`, `host`, `request_id`) pour fiabiliser les raisonnements et les enchainements automatiques
 - [x] Enrichir l'audit SQLite existant dans [server.py](server.py) avec l'identite du token/client, un identifiant de requete, le resultat et un export JSON
-- [ ] Ajouter des protections contre les boucles et l'epuisement des ressources: limites de concurrence par host, quotas par token, tailles maximales, circuit breaker et temporisation entre operations mutatrices
+- [x] Ajouter des protections contre les boucles et l'epuisement des ressources: limites de concurrence par host, quotas par token, tailles maximales, circuit breaker et temporisation entre operations mutatrices
 - [ ] Capturer l'etat avant les mutations Cloudflare, Notion, de configuration ou de fichier, puis proposer un tool `rollback_change`
 - [ ] Ajouter des playbooks guides comme `diagnose_service`, `diagnose_endpoint`, `audit_host` et `check_backup_chain`, avec une phase d'observation avant toute correction
 - [ ] Deplacer progressivement chaque domaine dans des modules comme `tools/ssh.py`, `tools/cloudflare.py` et `tools/dsm.py`, relies par un registre commun

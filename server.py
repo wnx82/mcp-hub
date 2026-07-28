@@ -34,6 +34,7 @@ from mcp.types import ToolAnnotations
 
 import config
 from _version import __version__
+from core.limits import LimitLease, ResourceLimiter
 from tools.inventory import list_hosts as list_hosts_tool
 
 # --- Config (see config.py / .env.example) ---
@@ -73,6 +74,14 @@ _current_request_id: contextvars.ContextVar[str | None] = contextvars.ContextVar
 )
 _mutating_functions: dict[str, Any] = {}
 _pending_mutations: dict[str, dict[str, Any]] = {}
+_resource_limiter = ResourceLimiter(
+    requests_per_minute=config.RATE_LIMIT_PER_MINUTE,
+    max_argument_bytes=config.MAX_ARGUMENT_BYTES,
+    max_concurrent_per_target=config.MAX_CONCURRENT_PER_HOST,
+    circuit_failures=config.CIRCUIT_FAILURES,
+    circuit_reset_seconds=config.CIRCUIT_RESET_SECONDS,
+    mutation_cooldown_seconds=config.MUTATION_COOLDOWN_SECONDS,
+)
 
 
 # --- Logging ---
@@ -471,6 +480,33 @@ def _access_refusal(profile, fn, args, kwargs) -> dict[str, Any] | None:
     return None
 
 
+def _request_targets(fn, args, kwargs) -> set[str]:
+    """Resolve explicit fleet targets, falling back to the hub itself."""
+    try:
+        bound = inspect.signature(fn).bind_partial(*args, **kwargs)
+        bound.apply_defaults()
+    except TypeError:
+        return {"hub"}
+    targets: set[str] = set()
+    for key in ("host", "target"):
+        value = bound.arguments.get(key)
+        if isinstance(value, str) and value:
+            targets.add(value)
+    for value in bound.arguments.get("hosts") or []:
+        if isinstance(value, str) and value:
+            targets.add(value)
+    for operation in bound.arguments.get("operations") or []:
+        if isinstance(operation, dict):
+            value = operation.get("host") or operation.get("target")
+            if isinstance(value, str) and value:
+                targets.add(value)
+    return targets or {"hub"}
+
+
+def _limit_identity(profile: dict[str, Any] | None) -> str:
+    return str((profile or {}).get("_identity") or (profile or {}).get("name") or "internal")
+
+
 def _response_envelope(
     tool: str,
     result: Any,
@@ -541,6 +577,7 @@ def _guarded_tool(*d_args, **d_kwargs):
             started = time.monotonic()
             request_id = _current_request_id.get() or secrets.token_hex(12)
             request_token = _current_request_id.set(request_id)
+            lease: LimitLease | None = None
             try:
                 if config.READ_ONLY and fn.__name__ in config.MUTATING_TOOLS:
                     result = {
@@ -563,6 +600,16 @@ def _guarded_tool(*d_args, **d_kwargs):
                             "hint": "call plan_mutation, then confirm_mutation",
                         }
                     if result is None:
+                        if fn.__name__ != "confirm_mutation":
+                            lease, limit_error = _resource_limiter.acquire(
+                                identity=_limit_identity(profile),
+                                arguments={"args": args, "kwargs": kwargs},
+                                targets=_request_targets(fn, args, kwargs),
+                                mutating=fn.__name__ in config.MUTATING_TOOLS,
+                            )
+                            if limit_error is not None:
+                                result = {"error": limit_error}
+                    if result is None:
                         try:
                             result = fn(*args, **kwargs)
                             if inspect.isawaitable(result):
@@ -573,9 +620,14 @@ def _guarded_tool(*d_args, **d_kwargs):
                 envelope = _response_envelope(
                     fn.__name__, result, started, request_id, fn, args, kwargs
                 )
+                if lease is not None:
+                    _resource_limiter.release(lease, succeeded=envelope["ok"])
+                    lease = None
                 _log_tool_audit(envelope)
                 return envelope
             finally:
+                if lease is not None:
+                    _resource_limiter.release(lease, succeeded=False)
                 _current_request_id.reset(request_token)
 
         tool_kwargs = dict(d_kwargs)
@@ -3433,7 +3485,7 @@ def plan_mutation(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
 async def confirm_mutation(confirmation_token: str) -> dict[str, Any]:
     """Execute one previously planned mutation and consume its confirmation token."""
     _purge_expired_mutations()
-    plan = _pending_mutations.pop(confirmation_token, None)
+    plan = _pending_mutations.get(confirmation_token)
     if plan is None:
         return {"error": "invalid, expired, or already used confirmation token"}
     profile = _current_profile.get()
@@ -3447,11 +3499,25 @@ async def confirm_mutation(confirmation_token: str) -> dict[str, Any]:
     refusal = _access_refusal(profile, fn, (), plan["arguments"])
     if refusal:
         return refusal
+    lease, limit_error = _resource_limiter.acquire(
+        identity=_limit_identity(profile),
+        arguments={"kwargs": plan["arguments"]},
+        targets=_request_targets(fn, (), plan["arguments"]),
+        mutating=True,
+    )
+    if limit_error is not None:
+        return {"error": limit_error, "tool": plan["tool"]}
+    _pending_mutations.pop(confirmation_token, None)
     context_token = _confirmed_mutation.set(True)
     try:
         result = fn(**plan["arguments"])
         result = await result if inspect.isawaitable(result) else result
+        succeeded = not (isinstance(result, dict) and result.get("error") is not None)
+        _resource_limiter.release(lease, succeeded=succeeded)
+        lease = None
     finally:
+        if lease is not None:
+            _resource_limiter.release(lease, succeeded=False)
         _confirmed_mutation.reset(context_token)
     return {"status": "executed", "tool": plan["tool"], "result": result}
 

@@ -187,6 +187,11 @@ Every tool returns the same top-level envelope:
 exceptions use the same shape with `ok: false`, making chained calls and audit
 correlation predictable.
 
+The central tool wrapper also bounds request size, calls per token, concurrent
+calls per target, repeated target failures, and mutation frequency. Defaults
+are documented in `.env.example`; limit refusals use the same response envelope
+and audit trail as every other call.
+
 | Group | Tools |
 |---|---|
 | **Fleet & shell** | `list_hosts` `topology` `system_info` `remote_exec` `local_exec` `fleet_exec` `batch_exec` `read_file` `service_ctl` `journal_query` `apt_status` `ssh_reset_control` `wake_host` `dhcp_reservations` `endpoints_health` `infra_snapshot` `destroy_resource` |
@@ -207,6 +212,8 @@ MCP Hub is a remote code execution service by design. Before exposing it:
   policies.
 - Set `MCP_AUTH_TOKEN` — the secret URL path is obscurity, not authentication.
 - Leave `MCP_READ_ONLY=true` until you trust what your model does with it.
+- Keep the resource-guard defaults enabled, then tune them from observed audit
+  traffic rather than disabling them.
 - Give it a dedicated SSH key and a minimal `hosts.yaml`.
 
 Full threat model, hardening guide, and vulnerability reporting:

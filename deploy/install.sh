@@ -55,6 +55,10 @@ install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0750 "$PREFIX/tools"
 for f in "$SRC"/tools/*.py; do
   install -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0640 "$f" "$PREFIX/tools/$(basename "$f")"
 done
+install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0750 "$PREFIX/core"
+for f in "$SRC"/core/*.py; do
+  install -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0640 "$f" "$PREFIX/core/$(basename "$f")"
+done
 
 # Rescue is deliberately outside PREFIX and uses the system Python. A broken
 # hub virtualenv or import must not make its diagnostics unavailable.

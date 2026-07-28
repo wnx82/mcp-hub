@@ -43,7 +43,7 @@ mcp-hub-rescue = "rescue.cli:main"
 
 [tool.setuptools]
 py-modules = ["server", "config", "_version"]
-packages = ["rescue", "tools"]
+packages = ["core", "rescue", "tools"]
 
 [tool.setuptools.dynamic]
 version = { attr = "_version.__version__" }
@@ -68,4 +68,4 @@ ignore = [
 # would bury every future diff. Same reasoning - its own PR, or never.
 
 [tool.ruff.lint.isort]
-known-first-party = ["config", "rescue", "server", "tools"]
+known-first-party = ["config", "core", "rescue", "server", "tools"]
