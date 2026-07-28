@@ -30,6 +30,8 @@ Fixed / Security.
   secret classification, and operational purpose.
 - A generated reference lists all MCP tools by group with their exact
   signatures and model-facing descriptions.
+- Tracked configuration examples now cover every documented runtime variable,
+  and tests verify the README links and load all YAML examples.
 - CI now exercises the systemd installer twice in an isolated staging tree,
   verifying installed files and preservation of local configuration.
 - CI builds and installs the wheel in a clean virtualenv, then checks both

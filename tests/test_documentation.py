@@ -51,6 +51,23 @@ class DocumentationTests(unittest.TestCase):
         )
         self.assertEqual(runtime, documented)
 
+    def test_environment_example_covers_the_complete_reference(self) -> None:
+        reference = (ROOT / "docs" / "environment.md").read_text(encoding="utf-8")
+        documented = set(
+            re.findall(r"^\| `([A-Z][A-Z0-9_]+)` \|", reference, re.MULTILINE)
+        )
+        example = (ROOT / ".env.example").read_text(encoding="utf-8")
+        represented = set(
+            re.findall(r"^#?([A-Z][A-Z0-9_]+)=", example, re.MULTILINE)
+        )
+        self.assertEqual(documented, represented)
+
+    def test_readme_example_links_exist(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        examples = set(re.findall(r"\]\(([^)]+\.example(?:\.[a-z]+)?)\)", readme))
+        self.assertGreaterEqual(len(examples), 4)
+        self.assertEqual([], sorted(path for path in examples if not (ROOT / path).is_file()))
+
     def test_generated_tool_reference_is_current(self) -> None:
         result = subprocess.run(
             ["python3", "scripts/generate_tool_reference.py", "--check"],
