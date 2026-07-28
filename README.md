@@ -127,6 +127,10 @@ are already isolated. `tools/registry.py` assigns extracted tools to a domain;
 that domain is included in each audit summary. New protocol logic should live
 in its domain module and must not import `server.py`.
 
+Future integrations are prioritized in
+[`docs/integration-evaluation.md`](docs/integration-evaluation.md), including
+their least-privilege scope and promotion gates.
+
 ## Rescue diagnostics
 
 `mcp-hub-rescue` is a read-only local CLI designed to keep working when the

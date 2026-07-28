@@ -56,6 +56,8 @@ Fixed / Security.
 - SSH construction, Cloudflare protocol helpers, DSM metadata, and playbook
   builders now live in domain modules connected by `tools/registry.py`; audit
   summaries include the resolved domain.
+- Future integrations now have a risk-ranked implementation order and explicit
+  least-privilege promotion gates in `docs/integration-evaluation.md`.
 - All model-facing tool descriptions are now in English, with a CI guard
   preventing missing descriptions or French text from being reintroduced.
 - The README now distinguishes development, direct-source, and recommended
