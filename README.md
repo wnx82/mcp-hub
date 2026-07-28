@@ -34,6 +34,7 @@ your assistant at it.
 
 - [Features](#features)
 - [Quick start](#quick-start)
+- [Rescue diagnostics](#rescue-diagnostics)
 - [Configuration](#configuration)
 - [Tool reference](#tool-reference)
 - [Security](#security)
@@ -94,6 +95,26 @@ and installs the unit. It is idempotent and never overwrites existing config.
 See [deploy/](deploy/).
 
 <!-- TODO: worked example — connecting from Claude Desktop / Claude Code -->
+
+## Rescue diagnostics
+
+`mcp-hub-rescue` is a read-only local CLI designed to keep working when the
+main server cannot import or its virtualenv is broken. The systemd installer
+copies it to `/opt/mcp-hub-rescue` and runs it with the system Python, outside
+the MCP Hub process and virtualenv.
+
+```bash
+sudo mcp-hub-rescue doctor
+sudo mcp-hub-rescue status
+sudo mcp-hub-rescue health
+sudo mcp-hub-rescue logs --lines 50
+sudo mcp-hub-rescue validate-config
+```
+
+Results are structured JSON. Rescue never imports `server.py`, `tools/*`, MCP,
+or an optional integration, and this boundary is enforced by CI. The current
+commands only observe and diagnose; restart, repair, and rollback operations
+will be added separately with confirmation and last-known-good safeguards.
 
 ## Configuration
 

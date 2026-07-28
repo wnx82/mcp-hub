@@ -8,6 +8,7 @@
 set -euo pipefail
 
 PREFIX="${PREFIX:-/opt/mcp-hub}"
+RESCUE_PREFIX="${RESCUE_PREFIX:-/opt/mcp-hub-rescue}"
 SERVICE_USER="${SERVICE_USER:-mcphub}"
 ENV_FILE="${ENV_FILE:-/etc/default/mcp-hub}"
 UNIT_FILE="/etc/systemd/system/mcp-hub.service"
@@ -37,13 +38,24 @@ fi
 # --- code --------------------------------------------------------------------
 log "installing code to $PREFIX"
 install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0750 "$PREFIX"
-for f in server.py config.py wake-host.py requirements.txt pyproject.toml README.md SECURITY.md LICENSE; do
+for f in server.py config.py _version.py wake-host.py requirements.txt pyproject.toml README.md SECURITY.md LICENSE .env.example CHANGELOG.md CONTRIBUTING.md; do
   [[ -f "$SRC/$f" ]] && install -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0640 "$SRC/$f" "$PREFIX/$f"
 done
 chmod 0750 "$PREFIX/server.py" "$PREFIX/wake-host.py"
 install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0750 "$PREFIX/deploy"
 install -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0750 \
   "$SRC/deploy/bw-serve-start.sh" "$PREFIX/deploy/bw-serve-start.sh"
+
+# Rescue is deliberately outside PREFIX and uses the system Python. A broken
+# hub virtualenv or import must not make its diagnostics unavailable.
+log "installing independent Rescue CLI to $RESCUE_PREFIX"
+install -d -o root -g root -m 0755 "$RESCUE_PREFIX/rescue"
+for f in "$SRC"/rescue/*.py; do
+  install -o root -g root -m 0644 "$f" "$RESCUE_PREFIX/rescue/$(basename "$f")"
+done
+sed "s|/opt/mcp-hub-rescue|$RESCUE_PREFIX|g" \
+  "$SRC/deploy/mcp-hub-rescue" > /usr/local/bin/mcp-hub-rescue
+chmod 0755 /usr/local/bin/mcp-hub-rescue
 
 # --- config templates (never overwrite) ---------------------------------------
 for pair in "hosts.example.yaml:hosts.yaml" \
@@ -123,5 +135,6 @@ echo "Next:"
 echo "  1. edit $PREFIX/hosts.yaml   — declare your fleet"
 echo "  2. edit $ENV_FILE            — enable the integrations you want"
 echo "  3. systemctl enable --now mcp-hub"
+echo "  4. mcp-hub-rescue doctor     — verify the independent diagnostics"
 echo
 warn "MCP_READ_ONLY=true is set. Flip it to false only once you trust the setup."

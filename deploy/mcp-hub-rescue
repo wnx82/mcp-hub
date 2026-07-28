@@ -1,0 +1,7 @@
+#!/bin/sh
+# Run Rescue with the system Python, independently of MCP Hub's virtualenv.
+set -eu
+
+rescue_home="${MCP_HUB_RESCUE_HOME:-/opt/mcp-hub-rescue}"
+export PYTHONPATH="$rescue_home${PYTHONPATH:+:$PYTHONPATH}"
+exec /usr/bin/python3 -m rescue.cli "$@"

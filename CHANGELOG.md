@@ -22,6 +22,16 @@ Fixed / Security.
 
 Nothing yet.
 
+## [0.2.0] - 2026-07-28
+
+### Added
+
+- A dependency-free, read-only `mcp-hub-rescue` CLI with `status`, `health`,
+  `logs`, `validate-config`, `diagnose`, and `doctor` commands. It is installed
+  outside the hub virtualenv and never imports the main server or integrations.
+- Rescue isolation tests run without installing MCP Hub dependencies and verify
+  that diagnostics still import when `server.py` is broken.
+
 ## [0.1.0] - 2026-07-28
 
 First public release. Extracted from a private deployment and made
@@ -87,5 +97,6 @@ config-driven so it can run against any fleet.
 - There is one trust level. Anyone holding the bearer token has full access;
   there is no per-tool ACL and no multi-user model.
 
-[Unreleased]: https://github.com/wnx82/mcp-hub/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/wnx82/mcp-hub/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/wnx82/mcp-hub/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/wnx82/mcp-hub/releases/tag/v0.1.0

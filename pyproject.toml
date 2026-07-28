@@ -39,9 +39,11 @@ Security = "https://github.com/wnx82/mcp-hub/blob/main/SECURITY.md"
 
 [project.scripts]
 mcp-hub = "server:main"
+mcp-hub-rescue = "rescue.cli:main"
 
 [tool.setuptools]
 py-modules = ["server", "config", "_version"]
+packages = ["rescue"]
 
 [tool.setuptools.dynamic]
 version = { attr = "_version.__version__" }
