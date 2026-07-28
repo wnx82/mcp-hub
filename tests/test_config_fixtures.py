@@ -51,9 +51,7 @@ class ConfigurationFixtureTests(unittest.TestCase):
         self.assertTrue(intermittent)
 
     def test_minimal_host_inventory_is_ready_to_customize(self) -> None:
-        with mock.patch.object(
-            config, "HOSTS_FILE", EXAMPLES / "hosts.minimal.yaml"
-        ):
+        with mock.patch.object(config, "HOSTS_FILE", EXAMPLES / "hosts.minimal.yaml"):
             hosts = config.load_hosts()
 
         self.assertEqual({"prox", "nas"}, set(hosts))
@@ -62,16 +60,20 @@ class ConfigurationFixtureTests(unittest.TestCase):
         self.assertTrue(hosts["nas"]["hostname"].endswith(".example.lan"))
 
     def test_guarded_topology_maps_guests_and_warnings(self) -> None:
-        with mock.patch.object(
-            config, "TOPOLOGY_FILE", EXAMPLES / "topology.guarded.yaml"
-        ):
+        with mock.patch.object(config, "TOPOLOGY_FILE", EXAMPLES / "topology.guarded.yaml"):
             topology = config.load_topology()
 
-        self.assertEqual(
-            "reverse-proxy", topology["prox"]["guests"]["ct/100"]["name"]
-        )
+        self.assertEqual("reverse-proxy", topology["prox"]["guests"]["ct/100"]["name"])
         self.assertIn("192.0.2.21", topology["_traps"])
         self.assertEqual(2, len(topology["_do_not_touch"]))
+
+    def test_minimal_endpoints_separate_intermittent_services(self) -> None:
+        with mock.patch.object(config, "ENDPOINTS_FILE", EXAMPLES / "endpoints.minimal.yaml"):
+            endpoints, intermittent = config.load_endpoints()
+
+        self.assertEqual(["reverse-proxy", "prometheus"], [endpoint["name"] for endpoint in endpoints])
+        self.assertEqual("media-server", intermittent[0]["name"])
+        self.assertTrue(all("example.lan" in item["url"] for item in [*endpoints, *intermittent]))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,12 @@
+# HTTP probes evaluated by endpoints_health().
+# Copy this file to endpoints.yaml and replace the fictional URLs.
+endpoints:
+  - name: reverse-proxy
+    url: https://proxy.example.lan/health
+  - name: prometheus
+    url: http://metrics.example.lan:9090/-/healthy
+
+# These probes run only when include_intermittent=true.
+intermittent:
+  - name: media-server
+    url: http://media.example.lan:32400/identity

@@ -36,6 +36,8 @@ Fixed / Security.
   storage host without including private infrastructure details.
 - A focused topology example maps Proxmox guests and documents stale-address
   traps, do-not-touch guidance, and its access-control limitations.
+- A minimal endpoint example demonstrates regular and opt-in intermittent
+  probes for `endpoints_health`.
 - CI now exercises the systemd installer twice in an isolated staging tree,
   verifying installed files and preservation of local configuration.
 - CI builds and installs the wheel in a clean virtualenv, then checks both

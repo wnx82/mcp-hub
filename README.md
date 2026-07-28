@@ -201,6 +201,13 @@ that must not be changed casually. The `_do_not_touch` entries are operational
 context for the assistant, not an enforced access-control boundary; use token
 profiles and host restrictions for technical enforcement.
 
+Add [`docs/examples/endpoints.minimal.yaml`](docs/examples/endpoints.minimal.yaml)
+to monitor always-on and intermittent HTTP services. Call
+`endpoints_health()` for the regular set, or
+`endpoints_health(include_intermittent=true)` to include services that may
+normally be powered off. Responses from `200` through `399` count as healthy;
+redirects are not followed.
+
 The complete defaults, limits, integration settings, and secret-handling notes
 are in the **[environment variable reference](docs/environment.md)**.
 
