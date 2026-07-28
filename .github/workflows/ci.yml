@@ -131,6 +131,11 @@ jobs:
           MCP_HUB_HOME: ${{ github.workspace }}
           MCP_READ_ONLY: "true"
         run: python scripts/check_tool_docs.py
+      - name: Tool descriptions are in English
+        env:
+          MCP_HUB_HOME: ${{ github.workspace }}
+          MCP_READ_ONLY: "true"
+        run: python scripts/check_tool_docstrings.py
 
   secrets:
     runs-on: ubuntu-latest

@@ -410,7 +410,7 @@ if config.READ_ONLY:
 # === TOOLS - Health / inventory ===
 @mcp.tool()
 async def mcp_health() -> dict[str, Any]:
-    """Etat du hub + joignabilite SSH parallele de chaque host."""
+    """Report hub health and probe every configured host concurrently over SSH."""
     hosts = _load_hosts()
 
     async def _tcp_check(host_info: dict) -> bool:
@@ -474,7 +474,7 @@ list_hosts = mcp.tool()(list_hosts_tool)
 # === TOOLS - Shell exec ===
 @mcp.tool()
 async def local_exec(command: str, as_root: bool = False, timeout_seconds: int = DEFAULT_TIMEOUT) -> dict[str, Any]:
-    """Execute une commande shell sur le hub lui-meme."""
+    """Run a shell command on the MCP Hub host."""
     if not command.strip():
         raise ValueError("La commande ne peut pas etre vide.")
     return await _local_run(command, as_root=as_root, timeout=max(1, min(timeout_seconds, MAX_TIMEOUT)))
@@ -482,7 +482,7 @@ async def local_exec(command: str, as_root: bool = False, timeout_seconds: int =
 
 @mcp.tool()
 async def remote_exec(host: str, command: str, as_root: bool = False, timeout_seconds: int = DEFAULT_TIMEOUT) -> dict[str, Any]:
-    """Execute une commande shell sur un host distant via SSH."""
+    """Run a shell command on a configured remote host over SSH."""
     if not command.strip():
         raise ValueError("La commande ne peut pas etre vide.")
     return await _ssh_run(host, command, as_root=as_root, timeout=max(1, min(timeout_seconds, MAX_TIMEOUT)))
@@ -491,7 +491,7 @@ async def remote_exec(host: str, command: str, as_root: bool = False, timeout_se
 # === TOOLS - System introspection ===
 @mcp.tool()
 async def system_info(host: Optional[str] = None) -> dict[str, Any]:
-    """Snapshot systeme complet: OS, uptime, CPU, RAM, disque, reseau, ports."""
+    """Return an OS, uptime, CPU, memory, disk, network, and listening-port snapshot."""
     combined = (
         "echo == OS ==; cat /etc/os-release 2>/dev/null | head -6; "
         "echo; echo == KERNEL ==; uname -a; "
@@ -513,7 +513,7 @@ async def service_ctl(
     action: Literal["status", "start", "stop", "restart", "reload", "enable", "disable", "is-active", "is-enabled"] = "status",
     host: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Wrapper systemctl. host=None = hub local."""
+    """Inspect or control a systemd service locally or on a configured host."""
     cmd = f"systemctl {action} {unit} --no-pager"
     if action == "status":
         cmd += " -l | head -40"
@@ -524,7 +524,7 @@ async def service_ctl(
 
 @mcp.tool()
 async def read_file(path: str, host: Optional[str] = None, max_bytes: int = 500_000, tail_only: bool = False) -> dict[str, Any]:
-    """Lecture de fichier avec redaction auto des secrets."""
+    """Read a file locally or remotely with automatic secret redaction."""
     max_bytes = max(1, min(max_bytes, 5_000_000))
     tool = "tail" if tail_only else "head"
     cmd = f"{tool} -c {max_bytes} {json.dumps(path)}"
@@ -550,7 +550,7 @@ async def journal_query(
     lines: int = 200,
     host: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Interroge journalctl avec filtres unit/since/priority/grep/lines."""
+    """Query journalctl with unit, time, priority, text, and line-count filters."""
     lines = max(1, min(lines, 1000))
     parts = ["journalctl", "--no-pager", "-n", str(lines)]
     if unit:
@@ -567,7 +567,7 @@ async def journal_query(
 
 @mcp.tool()
 async def apt_status(host: Optional[str] = None) -> dict[str, Any]:
-    """Liste des paquets a mettre a jour + count security."""
+    """List available package updates and count security updates."""
     cmd = "apt list --upgradable 2>/dev/null | tail -n +2"
     if host is None:
         return await _with_tool("apt_status", _local_run(cmd, as_root=True, timeout=45))
@@ -577,21 +577,21 @@ async def apt_status(host: Optional[str] = None) -> dict[str, Any]:
 # === TOOLS - Proxmox ===
 @mcp.tool()
 async def proxmox_list(host: str = DEFAULT_HOST) -> dict[str, Any]:
-    """Liste LXC + VMs sur un host Proxmox."""
+    """List LXC containers and virtual machines on a Proxmox host."""
     cmd = "echo === LXC ===; pct list 2>&1; echo; echo === VMs ===; qm list 2>&1"
     return await _with_tool("proxmox_list", _ssh_run(host, cmd, as_root=True, timeout=15))
 
 
 @mcp.tool()
 async def proxmox_ct_exec(ctid: int, command: str, host: str = DEFAULT_HOST, timeout_seconds: int = DEFAULT_TIMEOUT) -> dict[str, Any]:
-    """Execute une commande dans un LXC Proxmox via pct exec."""
+    """Run a command inside a Proxmox LXC container through pct exec."""
     cmd = f"pct exec {ctid} -- bash -c {json.dumps(command)}"
     return await _with_tool("proxmox_ct_exec", _ssh_run(host, cmd, as_root=True, timeout=max(1, min(timeout_seconds, MAX_TIMEOUT))))
 
 
 @mcp.tool()
 async def proxmox_ct_status(ctid: int, host: str = DEFAULT_HOST) -> dict[str, Any]:
-    """Statut + config d un LXC Proxmox."""
+    """Return the status and configuration of a Proxmox LXC container."""
     cmd = f"pct status {ctid} 2>&1; echo ---; pct config {ctid} 2>&1"
     return await _with_tool("proxmox_ct_status", _ssh_run(host, cmd, as_root=True, timeout=15))
 
@@ -619,26 +619,25 @@ async def docker_exec(container: str, command: str, host: str = DEFAULT_HOST, ct
 # === TOOLS - Cloudflare API ===
 @mcp.tool()
 async def cloudflare_tunnels_list() -> dict[str, Any]:
-    """Liste les Cloudflare Tunnels du compte (non supprimes)."""
+    """List active Cloudflare tunnels for the configured account."""
     return await _with_tool("cloudflare_tunnels_list", _cf_api("GET", f"/accounts/{CF_ACCOUNT_ID}/cfd_tunnel?is_deleted=false"))
 
 
 @mcp.tool()
 async def cloudflare_tunnel_get(tunnel_id: str) -> dict[str, Any]:
-    """Details d un tunnel Cloudflare par ID."""
+    """Return details for a Cloudflare tunnel by ID."""
     return await _with_tool("cloudflare_tunnel_get", _cf_api("GET", f"/accounts/{CF_ACCOUNT_ID}/cfd_tunnel/{tunnel_id}"))
 
 
 @mcp.tool()
 async def cloudflare_tunnel_config_get(tunnel_id: str) -> dict[str, Any]:
-    """Recupere la configuration (ingress rules) d un tunnel."""
+    """Return the ingress configuration of a Cloudflare tunnel."""
     return await _with_tool("cloudflare_tunnel_config_get", _cf_api("GET", f"/accounts/{CF_ACCOUNT_ID}/cfd_tunnel/{tunnel_id}/configurations"))
 
 
 @mcp.tool()
 async def cloudflare_tunnel_config_update(tunnel_id: str, ingress: list[dict]) -> dict[str, Any]:
-    """Met a jour les ingress rules d un tunnel (PUT - remplace tout).
-    TOUJOURS recuperer la config actuelle avec cloudflare_tunnel_config_get d abord."""
+    """Replace all ingress rules for a Cloudflare tunnel. Always read the current configuration first with cloudflare_tunnel_config_get."""
     return await _with_tool(
         "cloudflare_tunnel_config_update",
         _cf_api(
@@ -651,7 +650,7 @@ async def cloudflare_tunnel_config_update(tunnel_id: str, ingress: list[dict]) -
 
 @mcp.tool()
 async def cloudflare_dns_list(zone_id: Optional[str] = None, name_filter: Optional[str] = None) -> dict[str, Any]:
-    """Liste les records DNS d une zone."""
+    """List DNS records in the configured Cloudflare zone."""
     zid = zone_id or CF_ZONE_ID
     path = f"/zones/{zid}/dns_records?per_page=200"
     if name_filter:
@@ -661,7 +660,7 @@ async def cloudflare_dns_list(zone_id: Optional[str] = None, name_filter: Option
 
 @mcp.tool()
 async def cloudflare_dns_create(name: str, type: str, content: str, proxied: bool = True, ttl: int = 1, zone_id: Optional[str] = None) -> dict[str, Any]:
-    """Cree un record DNS (ttl=1 = auto)."""
+    """Create a DNS record in the configured Cloudflare zone."""
     zid = zone_id or CF_ZONE_ID
     return await _with_tool(
         "cloudflare_dns_create",
@@ -675,7 +674,7 @@ async def cloudflare_dns_create(name: str, type: str, content: str, proxied: boo
 
 @mcp.tool()
 async def cloudflare_dns_delete(record_id: str, zone_id: Optional[str] = None) -> dict[str, Any]:
-    """Supprime un record DNS par son ID."""
+    """Delete a Cloudflare DNS record by ID."""
     zid = zone_id or CF_ZONE_ID
     return await _with_tool("cloudflare_dns_delete", _cf_api("DELETE", f"/zones/{zid}/dns_records/{record_id}"))
 
@@ -686,14 +685,14 @@ async def cloudflare_api(
     path: str,
     json_body: Optional[dict] = None,
 ) -> dict[str, Any]:
-    """Appel API Cloudflare brut. Path doit commencer par /."""
+    """Call an allowlisted path on the Cloudflare API."""
     return await _cf_api(method, path, json_body=json_body)
 
 
 # === TOOLS - Meta / stats ===
 @mcp.tool()
 def mcp_stats(last_n: int = 200) -> dict[str, Any]:
-    """Stats des N derniers appels: count par outil, latence moyenne/max, erreurs."""
+    """Summarize recent tool calls, latency, return codes, and errors."""
     last_n = max(1, min(last_n, 10_000))
     con = sqlite3.connect(STATE_DB)
     cur = con.cursor()
@@ -788,16 +787,7 @@ async def fleet_exec(
     skip_unreachable: bool = True,
     timeout_seconds: int = DEFAULT_TIMEOUT,
 ) -> dict[str, Any]:
-    """Execute la MEME commande sur plusieurs hosts EN PARALLELE (un seul appel).
-
-    Selection des cibles:
-      - hosts: explicit list of hosts.yaml keys. None => every host.
-      - tags: filtre par tag (match ANY), ex. ["docker"] ou ["proxmox", "critical"].
-      - exclude: hosts a retirer de la selection.
-      - include_hub: ajoute aussi le hub local (mcp-hub lui-meme).
-    skip_unreachable: pre-check TCP, ecarte les hosts injoignables (evite les hangs 10s).
-    Retourne {results: {host: {...}}, summary: {targets, ok, failed, unreachable}}.
-    """
+    """Run the same command concurrently across hosts selected by name or tag. Returns per-host results and an aggregate success summary."""
     if not command.strip():
         raise ValueError("La commande ne peut pas etre vide.")
     timeout = max(1, min(timeout_seconds, MAX_TIMEOUT))
@@ -854,21 +844,7 @@ async def batch_exec(
     operations: list[dict],
     timeout_seconds: int = DEFAULT_TIMEOUT,
 ) -> dict[str, Any]:
-    """Execute plusieurs operations HETEROGENES en parallele, en un seul appel.
-
-    operations: liste d'objets, chacun:
-      {
-        "target":    a hosts.yaml key, or "hub" / "local",         (required)
-        "command":   "<bash>",                                      (requis)
-        "ctid":      107,       (option) => 'pct exec <ctid> -- bash -c ...'
-        "container": "nginx",   (option) => 'docker exec <c> sh -c ...'
-        "as_root":   true,      (option, defaut false)
-        "label":     "..."      (option, pour retrouver le resultat)
-      }
-    ctid et container sont combinables (docker dans un LXC).
-    Retourne {results: [ {label, target, return_code, stdout, stderr, error, duration_ms} ]}
-    dans l'ordre des operations. Une op en erreur n'interrompt pas les autres.
-    """
+    """Run heterogeneous operations concurrently in one request. Each operation selects a target, command, optional container, timeout, and label."""
     if not operations:
         raise ValueError("operations vide.")
     if len(operations) > MAX_FANOUT_TARGETS:
@@ -916,10 +892,7 @@ async def batch_exec(
 
 @mcp.tool()
 async def infra_snapshot(skip_unreachable: bool = True) -> dict[str, Any]:
-    """Vue d'ensemble de TOUTE l'infra en un seul appel (read-only, parallele):
-    mini-stats par host joignable (uptime/RAM/disque), LXC+VM sur les hosts proxmox,
-    docker ps sur les hosts docker. Cibles derivees des tags de hosts.yaml.
-    """
+    """Collect a read-only, concurrent overview of the configured infrastructure."""
     all_hosts = _load_hosts()
     names = list(all_hosts.keys())
 
@@ -988,15 +961,7 @@ async def _bw_request(method: str, path: str, params: Optional[dict] = None, jso
 
 @mcp.tool()
 async def vault_search(query: str, limit: int = 10) -> dict[str, Any]:
-    """Recherche des items Vaultwarden par nom, username ou URL.
-
-    Retourne une liste allégée (id, name, folderId, type, username) sans les mots de passe.
-    Utilise vault_get_item(id) pour récupérer les détails complets (login/password/fields).
-
-    Args:
-        query: Terme de recherche (recherche full-text sur name/username/URI)
-        limit: Nombre max de résultats retournés (défaut 10)
-    """
+    """Search Vaultwarden items by name, username, or URL without returning passwords."""
     result = await _bw_request("GET", "/list/object/items", params={"search": query})
     if "error" in result:
         return result
@@ -1019,10 +984,7 @@ async def vault_search(query: str, limit: int = 10) -> dict[str, Any]:
 
 @mcp.tool()
 async def vault_list_folders() -> dict[str, Any]:
-    """Liste tous les folders du Vaultwarden (id + name).
-
-    Utile pour organiser les vault_create_item / retrouver le folderId.
-    """
+    """List Vaultwarden folders by ID and name."""
     result = await _bw_request("GET", "/list/object/folders")
     if "error" in result:
         return result
@@ -1032,14 +994,7 @@ async def vault_list_folders() -> dict[str, Any]:
 
 @mcp.tool()
 async def vault_get_item(name_or_id: str) -> dict[str, Any]:
-    """Récupère un item Vaultwarden complet par UUID ou nom exact.
-
-    Retourne l'item complet (login {username, password, uris, totp}, notes, fields).
-    Si plusieurs items matchent le nom, retourne les candidats pour désambiguïsation.
-
-    Args:
-        name_or_id: UUID (36 chars) ou nom exact de l'item
-    """
+    """Return a complete Vaultwarden item by UUID or exact name."""
     # Tentative directe par UUID
     if len(name_or_id) == 36 and name_or_id.count("-") == 4:
         result = await _bw_request("GET", f"/object/item/{name_or_id}")
@@ -1070,19 +1025,7 @@ async def vault_get_item(name_or_id: str) -> dict[str, Any]:
 
 @mcp.tool()
 async def vault_get_field(item_ref: str, field_name: str) -> dict[str, Any]:
-    """Récupère UN champ spécifique d'un item (limite l'exposition vs vault_get_item).
-
-    field_name accepte :
-    - 'password' ou 'login.password' → login.password
-    - 'username' ou 'login.username' → login.username
-    - 'notes' → item.notes
-    - 'totp' → login.totp
-    - nom d'un champ custom (case-insensitive, matche item.fields[].name)
-
-    Args:
-        item_ref: UUID ou nom exact de l'item
-        field_name: Nom du champ à récupérer
-    """
+    """Return one field from a Vaultwarden item to limit secret exposure."""
     item = await vault_get_item(item_ref)
     if "error" in item:
         return item
@@ -1109,21 +1052,7 @@ async def vault_get_field(item_ref: str, field_name: str) -> dict[str, Any]:
 
 @mcp.tool()
 async def vault_create_item(item: dict) -> dict[str, Any]:
-    """Crée un nouvel item dans le Vaultwarden.
-
-    Structure JSON attendue (exemple login) :
-    {
-      "type": 1,  # 1=login, 2=secure note, 3=card, 4=identity
-      "name": "Nom de l'item",
-      "folderId": "uuid-du-folder or null",
-      "notes": "Notes optionnelles",
-      "login": {"username": "user", "password": "pass", "uris": [{"uri": "https://..."}], "totp": null},
-      "fields": [{"name": "MY_FIELD", "value": "xxx", "type": 0, "linkedId": null}]
-    }
-
-    Types de field : 0=text visible, 1=hidden (password), 2=boolean.
-    Retourne l'item créé avec son nouveau UUID.
-    """
+    """Create a Vaultwarden item and return its assigned UUID."""
     result = await _bw_request("POST", "/object/item", json_body=item, timeout=30.0)
     if "error" in result:
         return result
@@ -1134,17 +1063,7 @@ async def vault_create_item(item: dict) -> dict[str, Any]:
 
 @mcp.tool()
 async def vault_update_item(item_id: str, patch: dict) -> dict[str, Any]:
-    """Met à jour un item existant en fusionnant un patch dict au niveau top-level.
-
-    Fetch l'item courant, applique le patch (name/notes/login/fields/folderId au niveau top),
-    puis PUT le résultat mergé. Pour modifier UN champ dans login (ex password), passer login complet :
-      patch = {"login": {"username": "same", "password": "new", "uris": [...], "totp": null}}
-    Pour ajouter des fields sans écraser, passer la liste complète (existants + nouveaux) dans patch['fields'].
-
-    Args:
-        item_id: UUID de l'item à modifier
-        patch: Dict des champs top-level à écraser
-    """
+    """Update a Vaultwarden item by merging a top-level patch."""
     current = await _bw_request("GET", f"/object/item/{item_id}")
     if "error" in current:
         return current
@@ -1246,10 +1165,7 @@ async def _notion_request(
 
 @mcp.tool()
 async def notion_reload_token() -> dict[str, Any]:
-    """Force refetch du token Notion depuis Vaultwarden (invalide le cache memoire).
-
-    Utile apres rotation du token dans Vaultwarden pour eviter un restart du hub.
-    """
+    """Invalidate the cached Notion token and reload it from Vaultwarden."""
     try:
         token = await _notion_get_token(force_refresh=True)
         return {"success": True, "token_prefix": token[:6] + "...", "cached": True}
@@ -1264,17 +1180,7 @@ async def notion_search(
     page_size: int = 10,
     start_cursor: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Search across pages and databases the integration has access to.
-
-    L'integration ne voit que les pages/databases explicitement partages avec elle
-    (via Add connections dans Notion).
-
-    Args:
-        query: Text to search (empty string = list all accessible).
-        filter_type: 'page' or 'database' to filter object type (default: no filter).
-        page_size: 1-100 (default 10).
-        start_cursor: Pagination cursor from previous response.next_cursor.
-    """
+    """Search pages and databases available to the Notion integration."""
     body: dict[str, Any] = {"query": query, "page_size": max(1, min(100, page_size))}
     if filter_type:
         body["filter"] = {"property": "object", "value": filter_type}
@@ -1285,13 +1191,7 @@ async def notion_search(
 
 @mcp.tool()
 async def notion_get_page(page_id: str) -> dict[str, Any]:
-    """Retrieve a page's metadata + properties (NOT block content).
-
-    Pour le contenu (blocs), utiliser notion_get_block_children.
-
-    Args:
-        page_id: UUID (avec ou sans tirets).
-    """
+    """Return Notion page metadata and properties, excluding block content."""
     return await _notion_request("GET", f"/pages/{page_id}")
 
 
@@ -1301,13 +1201,7 @@ async def notion_get_block_children(
     page_size: int = 100,
     start_cursor: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Retrieve children blocks of a page or block (le contenu d'une page).
-
-    Args:
-        block_id: Page ID ou block ID (une page = un block racine).
-        page_size: 1-100 (default 100).
-        start_cursor: Pagination cursor.
-    """
+    """Return child blocks for a Notion page or block."""
     params: dict[str, Any] = {"page_size": str(max(1, min(100, page_size)))}
     if start_cursor:
         params["start_cursor"] = start_cursor
@@ -1322,17 +1216,7 @@ async def notion_query_database(
     page_size: int = 100,
     start_cursor: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Query a database (liste les rows avec filtres/tri).
-
-    Args:
-        database_id: UUID de la database.
-        filter: Notion filter object. Exemple:
-                {"property": "Status", "select": {"equals": "Done"}}
-        sorts: Liste de sort objects. Exemple:
-               [{"property": "Created", "direction": "descending"}]
-        page_size: 1-100 (default 100).
-        start_cursor: Pagination cursor.
-    """
+    """Query a Notion database with optional filters, sorting, and pagination."""
     body: dict[str, Any] = {"page_size": max(1, min(100, page_size))}
     if filter:
         body["filter"] = filter
@@ -1351,19 +1235,7 @@ async def notion_create_page(
     icon: Optional[dict] = None,
     cover: Optional[dict] = None,
 ) -> dict[str, Any]:
-    """Create a new page dans une page parente ou une database.
-
-    Args:
-        parent: Identifiant du parent. Exemples:
-                {"page_id": "<uuid>"}       - sous-page d'une page
-                {"database_id": "<uuid>"}   - ligne de database
-        properties: Properties dict. Pour sous-page d'une page:
-                    {"title": [{"text": {"content": "Mon titre"}}]}
-                    Pour ligne de database, les cles doivent matcher le schema.
-        children: Liste optionnelle de block objects (le contenu de la page).
-        icon: e.g. {"type": "emoji", "emoji": "PICTOGRAM"}
-        cover: e.g. {"type": "external", "external": {"url": "https://..."}}
-    """
+    """Create a Notion page under a parent page or database."""
     body: dict[str, Any] = {"parent": parent, "properties": properties or {}}
     if children:
         body["children"] = children
@@ -1382,18 +1254,7 @@ async def notion_update_page(
     icon: Optional[dict] = None,
     cover: Optional[dict] = None,
 ) -> dict[str, Any]:
-    """Update les properties/icon/cover d'une page, ou archive/restore.
-
-    NOTE: Ne modifie PAS le contenu (blocs). Pour ca, utiliser notion_append_blocks
-    ou notion_delete_block.
-
-    Args:
-        page_id: UUID.
-        properties: Properties a modifier (merge partiel).
-        archived: True pour soft-delete (corbeille), False pour restaurer.
-        icon: Nouvel icon object.
-        cover: Nouveau cover object.
-    """
+    """Update a Notion page's properties, icon, cover, or archive state."""
     body: dict[str, Any] = {}
     if properties is not None:
         body["properties"] = properties
@@ -1410,13 +1271,7 @@ async def notion_update_page(
 
 @mcp.tool()
 async def notion_archive_page(page_id: str) -> dict[str, Any]:
-    """Soft-delete une page (envoie a la corbeille Notion).
-
-    Reversible via notion_update_page(page_id, archived=False).
-
-    Args:
-        page_id: UUID.
-    """
+    """Move a Notion page to the trash using a reversible archive operation."""
     return await _notion_request("PATCH", f"/pages/{page_id}", json_body={"archived": True})
 
 
@@ -1426,16 +1281,7 @@ async def notion_append_blocks(
     children: list,
     after: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Append des blocs a une page ou a un bloc parent.
-
-    Args:
-        block_id: Page ID ou block ID parent.
-        children: Liste de block objects. Exemple:
-                  [{"object": "block", "type": "paragraph",
-                    "paragraph": {"rich_text": [{"type": "text",
-                                                 "text": {"content": "Hello"}}]}}]
-        after: Block ID apres lequel inserer (default: append a la fin).
-    """
+    """Append block objects to a Notion page or parent block."""
     body: dict[str, Any] = {"children": children}
     if after:
         body["after"] = after
@@ -1444,13 +1290,7 @@ async def notion_append_blocks(
 
 @mcp.tool()
 async def notion_delete_block(block_id: str) -> dict[str, Any]:
-    """Hard-delete d'un bloc (retire des children du parent). Non reversible via API.
-
-    Pour supprimer une PAGE entiere, prefere notion_archive_page (reversible).
-
-    Args:
-        block_id: UUID.
-    """
+    """Permanently delete a Notion block from its parent."""
     return await _notion_request("DELETE", f"/blocks/{block_id}")
 
 
@@ -1515,10 +1355,7 @@ async def _n8n_request(
 
 @mcp.tool()
 async def n8n_health() -> dict[str, Any]:
-    """Verifie la joignabilite de l'instance n8n et le mode d'ecriture.
-
-    Utile pour diagnostiquer avant d'appeler les autres tools n8n.
-    """
+    """Check n8n reachability and report whether writes are enabled."""
     probe = await _n8n_request("GET", "/workflows", params={"limit": 1})
     return {
         "n8n_api_url": N8N_API_URL,
@@ -1537,13 +1374,7 @@ async def n8n_list_workflows(
     tags: Optional[str] = None,
     limit: int = 100,
 ) -> dict[str, Any]:
-    """Liste les workflows de l'instance n8n.
-
-    Args:
-        active_only: si True, ne retourne que les workflows actifs.
-        tags: filtre par noms de tags, separes par des virgules.
-        limit: nombre max de resultats (1-250, defaut 100).
-    """
+    """List n8n workflows with bounded pagination."""
     params: dict[str, Any] = {"limit": max(1, min(int(limit), 250))}
     if active_only:
         params["active"] = "true"
@@ -1554,11 +1385,7 @@ async def n8n_list_workflows(
 
 @mcp.tool()
 async def n8n_get_workflow(id: str) -> dict[str, Any]:
-    """Recupere un workflow complet avec ses noeuds et connexions.
-
-    Args:
-        id: ID du workflow.
-    """
+    """Return a complete n8n workflow including nodes and connections."""
     return await _n8n_request("GET", f"/workflows/{id}")
 
 
@@ -1568,13 +1395,7 @@ async def n8n_list_executions(
     status: Optional[str] = None,
     limit: int = 20,
 ) -> dict[str, Any]:
-    """Liste les executions recentes de workflows.
-
-    Args:
-        workflow_id: restreint a un workflow donne.
-        status: 'error' | 'success' | 'waiting'.
-        limit: nombre max de resultats (1-250, defaut 20).
-    """
+    """List recent n8n workflow executions with bounded pagination."""
     params: dict[str, Any] = {"limit": max(1, min(int(limit), 250))}
     if workflow_id:
         params["workflowId"] = workflow_id
@@ -1585,34 +1406,21 @@ async def n8n_list_executions(
 
 @mcp.tool()
 async def n8n_get_execution(id: str, include_data: bool = False) -> dict[str, Any]:
-    """Recupere une execution precise.
-
-    Args:
-        id: ID de l'execution.
-        include_data: si True, inclut le payload complet (peut etre volumineux).
-    """
+    """Return one n8n workflow execution by ID."""
     params = {"includeData": "true"} if include_data else None
     return await _n8n_request("GET", f"/executions/{id}", params=params)
 
 
 @mcp.tool()
 async def n8n_activate_workflow(id: str) -> dict[str, Any]:
-    """Active un workflow (enregistre les webhooks, arme les schedules).
-
-    Args:
-        id: ID du workflow.
-    """
+    """Activate an n8n workflow and register its triggers."""
     _n8n_require_write()
     return await _n8n_request("POST", f"/workflows/{id}/activate")
 
 
 @mcp.tool()
 async def n8n_deactivate_workflow(id: str) -> dict[str, Any]:
-    """Desactive un workflow.
-
-    Args:
-        id: ID du workflow.
-    """
+    """Deactivate an n8n workflow."""
     _n8n_require_write()
     return await _n8n_request("POST", f"/workflows/{id}/deactivate")
 
@@ -1625,18 +1433,7 @@ async def n8n_call_webhook(
     headers: Optional[dict] = None,
     timeout_seconds: int = 60,
 ) -> dict[str, Any]:
-    """Declenche un workflow n8n via une de ses URLs de webhook.
-
-    C'est la seule facon d'executer un workflow : l'API publique n8n n'expose
-    pas d'endpoint 'run' generique, les workflows partent de leurs noeuds trigger.
-
-    Args:
-        path: chemin du webhook, ex. '/webhook/mon-hook'. Une URL complete est acceptee.
-        method: methode HTTP (GET, POST, PUT, DELETE, PATCH).
-        payload: corps JSON pour POST/PUT/PATCH.
-        headers: en-tetes HTTP supplementaires.
-        timeout_seconds: timeout de l'appel (defaut 60).
-    """
+    """Trigger an n8n workflow through one of its webhook URLs."""
     _n8n_require_write()
     if path.startswith(("http://", "https://")):
         url = path
@@ -1707,18 +1504,7 @@ def _lms_arg(value: Any, label: str) -> str:
 async def wake_host(
     host: str, wait_port: Optional[int] = None, wait_seconds: int = 0
 ) -> dict[str, Any]:
-    """Reveille une machine par Wake-on-LAN (magic packet UDP broadcast).
-
-    La MAC est lue dans hosts.yaml : seuls les hosts avec une cle 'mac' sont
-    wakeable (any host with a `mac` entry in hosts.yaml).
-
-    wait_port / wait_seconds : si fournis, sonde le port TCP toutes les 3s
-    jusqu'a wait_seconds et renvoie woken=True des qu'il repond.
-    Exemples : wait_port=22 (SSH), wait_port=1234 (LM Studio).
-
-    NB : le WoL en Wi-Fi est peu fiable ; si ca echoue, basculer
-    l'host sur son interface Ethernet dans hosts.yaml.
-    """
+    """Wake a configured host by sending a Wake-on-LAN magic packet."""
     hosts = _load_hosts()
     if host not in hosts:
         return {
@@ -1794,15 +1580,7 @@ async def wake_host(
 
 @mcp.tool()
 async def lmstudio_status(include_gpu: bool = True) -> dict[str, Any]:
-    """Etat de LM Studio sur l'hote LMSTUDIO_HOST : serveur joignable,
-    modeles, VRAM.
-
-    Renvoie pour chaque modele son etat ('loaded' / 'not-loaded'), son contexte
-    charge et son contexte max, plus la liste 'loaded' des modeles actifs.
-    include_gpu=True ajoute nvidia-smi (nom GPU, VRAM utilisee/totale, charge).
-
-    Ne bloque pas si l'hote est eteint : timeouts courts, reponse en ~3s.
-    """
+    """Report LM Studio host reachability, server state, and loaded models."""
     info = _get_host(LMSTUDIO_HOST)
     ip = info["hostname"]
     base = "http://" + ip + ":" + str(LMSTUDIO_PORT)
@@ -1884,22 +1662,7 @@ async def lmstudio_load(
     identifier: Optional[str] = None,
     timeout_seconds: int = 240,
 ) -> dict[str, Any]:
-    """Charge un modele dans LM Studio (CLI `lms load`).
-
-    model            : cle du modele, cf lmstudio_status() (ex 'ornith-1.0-9b').
-    context_length   : fenetre de contexte totale.
-    gpu              : 'max' | 'off' | fraction 0..1 (ex '0.5').
-    ttl_seconds      : decharge auto apres N secondes d'inactivite.
-    parallel         : nb max de predictions simultanees.
-    identifier       : alias expose dans l'API (sinon = cle du modele).
-
-    ATTENTION VRAM : la RTX 5070 n'a que 12 Go. Charger Ornith 9B et
-    Qwen2.5-Coder 7B ensemble provoque un debordement. Verifier l'occupation
-    avec lmstudio_status() avant d'empiler.
-
-    RAPPEL Continue : le budget de prompt vaut contextLength - maxTokens.
-    Garder maxTokens < contextLength cote client, sinon toute requete echoue.
-    """
+    """Load a model in LM Studio through the remote lms CLI."""
     try:
         parts = ["lms", "load", _lms_arg(model, "model"), "--yes"]
         if context_length is not None:
@@ -1941,15 +1704,7 @@ async def lmstudio_load(
 async def lmstudio_unload(
     identifier: Optional[str] = None, all_models: bool = False
 ) -> dict[str, Any]:
-    """Decharge un modele LM Studio (CLI `lms unload`), libere la VRAM.
-
-    identifier : modele a decharger. Si omis et qu'un seul modele est charge,
-                 celui-ci est decharge automatiquement.
-    all_models : decharge tout (`lms unload --all`).
-
-    Sans identifier ni all_models, si plusieurs modeles sont charges, le CLI
-    passerait en mode interactif : la commande est donc refusee dans ce cas.
-    """
+    """Unload a model from LM Studio and release its allocated memory."""
     if all_models:
         command = "lms unload --all"
     elif identifier:
@@ -2296,16 +2051,7 @@ def _dsm_storage_warnings(summary: dict) -> list[str]:
 
 @mcp.tool()
 async def dsm_health() -> dict[str, Any]:
-    """Bilan de sante complet du NAS Synology en un seul appel.
-
-    Agrege : modele + version DSM + uptime, etat des volumes/pools/disques (SMART,
-    temperature, remplissage), charge CPU/RAM, et disponibilite d'une mise a jour DSM.
-    Renvoie un verdict global ('ok' / 'attention' / 'danger' / 'unreachable') et la
-    liste des points d'alerte.
-
-    Tolerant a la panne : si le NAS est eteint, renvoie verdict='unreachable' sans
-    bloquer (pre-check TCP 3 s).
-    """
+    """Return a consolidated health report for the configured Synology NAS."""
     info, storage, health, upgrade, util = await asyncio.gather(
         _dsm_call("SYNO.Core.System", "info", 3),
         _dsm_call("SYNO.Storage.CGI.Storage", "load_info", 1),
@@ -2377,11 +2123,7 @@ async def dsm_health() -> dict[str, Any]:
 
 @mcp.tool()
 async def dsm_system_info(include_utilization: bool = True) -> dict[str, Any]:
-    """Infos systeme DSM : modele, version, serie, CPU/RAM, uptime, temperature, NTP.
-
-    Args:
-        include_utilization: ajoute la charge temps reel (CPU, RAM, reseau, disques).
-    """
+    """Return Synology model, DSM version, CPU, memory, uptime, temperature, and NTP state."""
     info = await _dsm_call("SYNO.Core.System", "info", 3)
     if not info.get("success"):
         return info
@@ -2404,11 +2146,7 @@ async def dsm_system_info(include_utilization: bool = True) -> dict[str, Any]:
 
 @mcp.tool()
 async def dsm_storage(raw: bool = False) -> dict[str, Any]:
-    """Etat du stockage : volumes, pools RAID, disques (SMART, temperature, duree de vie).
-
-    Args:
-        raw: True pour renvoyer la reponse DSM brute (tres verbeuse) au lieu du resume.
-    """
+    """Return Synology volumes, storage pools, RAID state, disks, SMART state, and temperatures."""
     result = await _dsm_call("SYNO.Storage.CGI.Storage", "load_info", 1, timeout=45.0)
     if not result.get("success"):
         return result
@@ -2422,12 +2160,7 @@ async def dsm_storage(raw: bool = False) -> dict[str, Any]:
 
 @mcp.tool()
 async def dsm_shares(limit: int = 100, with_details: bool = True) -> dict[str, Any]:
-    """Liste les dossiers partages DSM (nom, volume, chiffrement, corbeille, description).
-
-    Args:
-        limit: nombre max de partages (defaut 100).
-        with_details: joint hidden/encryption/recyclebin/quota.
-    """
+    """List Synology shared folders with volume, encryption, recycle-bin, and description metadata."""
     params: dict[str, Any] = {"offset": 0, "limit": max(1, min(500, limit))}
     if with_details:
         params["additional"] = ["hidden", "encryption", "recyclebin", "share_quota", "is_cold_storage_share"]
@@ -2440,12 +2173,7 @@ async def dsm_shares(limit: int = 100, with_details: bool = True) -> dict[str, A
 
 @mcp.tool()
 async def dsm_packages(only_running: bool = False, only_stopped: bool = False) -> dict[str, Any]:
-    """Liste les paquets DSM installes avec leur statut (running / stopped / broken).
-
-    Args:
-        only_running: ne garder que les paquets demarres.
-        only_stopped: ne garder que les paquets arretes.
-    """
+    """List installed Synology packages and their current state."""
     result = await _dsm_call(
         "SYNO.Core.Package", "list", 2,
         {"additional": ["status", "installed_info"], "ignore_hidden": False},
@@ -2480,15 +2208,7 @@ async def dsm_package_control(
     package_id: str,
     action: Literal["start", "stop", "restart"],
 ) -> dict[str, Any]:
-    """[ECRITURE] Demarre, arrete ou redemarre un paquet DSM.
-
-    Args:
-        package_id: identifiant technique du paquet (ex: 'SurveillanceStation',
-                    'DownloadStation', 'FileStation') - voir dsm_packages.
-        action: start | stop | restart (restart = stop puis start).
-
-    Attention : arreter un paquet coupe le service correspondant immediatement.
-    """
+    """Start, stop, or restart an installed Synology package."""
     steps: list[dict[str, Any]] = []
     sequence = ["stop", "start"] if action == "restart" else [action]
     for step in sequence:
@@ -2506,14 +2226,7 @@ async def dsm_logs(
     keyword: Optional[str] = None,
     start: int = 0,
 ) -> dict[str, Any]:
-    """Journal systeme DSM (equivalent du Centre de journalisation).
-
-    Args:
-        limit: nombre d'entrees (defaut 50, max 500).
-        level: all | info | warn | err.
-        keyword: filtre texte optionnel.
-        start: offset de pagination.
-    """
+    """Return a bounded selection of Synology system log entries."""
     params: dict[str, Any] = {"start": start, "limit": max(1, min(500, limit)), "level": level}
     if keyword:
         params["keyword"] = keyword
@@ -2535,7 +2248,7 @@ async def dsm_logs(
 
 @mcp.tool()
 async def dsm_updates() -> dict[str, Any]:
-    """Verifie la disponibilite d'une mise a jour DSM (ne l'installe pas)."""
+    """Check whether a DSM update is available without installing it."""
     result = await _dsm_call("SYNO.Core.Upgrade.Server", "check", 4, timeout=45.0)
     if not result.get("success"):
         return result
@@ -2551,7 +2264,7 @@ async def dsm_updates() -> dict[str, Any]:
 
 @mcp.tool()
 async def dsm_connections() -> dict[str, Any]:
-    """Sessions/connexions en cours sur le NAS (SMB, AFP, FTP, DSM web, ...)."""
+    """List active SMB, AFP, FTP, and DSM web sessions on the NAS."""
     result = await _dsm_call("SYNO.Core.CurrentConnection", "list", 1)
     if not result.get("success"):
         return result
@@ -2565,18 +2278,7 @@ async def dsm_power(
     confirm: bool = False,
     mode: Literal["auto", "ssh", "api"] = "auto",
 ) -> dict[str, Any]:
-    """[ECRITURE - DESTRUCTIF] Eteint ou redemarre le systeme DSM (VM100 uniquement).
-
-    NE coupe PAS l'hyperviseur ni les autres invites. Si DSM tourne dans une VM,
-    celle-ci ne repart pas seule apres un shutdown : la redemarrer cote
-    hyperviseur (`qm start <vmid>`).
-
-    Args:
-        action: shutdown | reboot.
-        confirm: doit valoir True, garde-fou contre un declenchement accidentel.
-        mode: auto (SSH pour shutdown - chemin eprouve via sudo NOPASSWD /sbin/poweroff -,
-              API pour reboot), ssh, ou api.
-    """
+    """Shut down or restart the Synology system. Requires explicit confirmation."""
     if not confirm:
         return {
             "success": False,
@@ -2614,19 +2316,7 @@ async def dsm_file_list(
     sort_by: Literal["name", "size", "mtime", "type"] = "name",
     dirs_only: bool = False,
 ) -> dict[str, Any]:
-    """Parcourt les dossiers partages via FileStation.
-
-    Args:
-        path: chemin FileStation relatif au partage, ex '/video' ou '/video/Films'.
-              None ou vide = liste les partages racine.
-        limit: nombre max d'entrees (defaut 50).
-        offset: pagination.
-        sort_by: critere de tri.
-        dirs_only: ne renvoyer que les dossiers.
-
-    Note : les chemins FileStation commencent par le nom du PARTAGE ('/video'),
-    pas par le volume ('/volume1/video' est invalide -> erreur 408).
-    """
+    """List files and directories in Synology shared folders through FileStation."""
     if not path:
         result = await _dsm_call(
             "SYNO.FileStation.List", "list_share", 2,
@@ -2678,16 +2368,7 @@ async def dsm_file_search(
     limit: int = 50,
     max_wait_seconds: int = 25,
 ) -> dict[str, Any]:
-    """Recherche de fichiers via FileStation (API asynchrone : start -> poll -> clean).
-
-    Args:
-        folder_path: dossier de depart, chemin partage ex '/video'.
-        pattern: motif, ex '*.mkv' ou 'facture'.
-        recursive: descendre dans les sous-dossiers.
-        limit: nombre de resultats renvoyes.
-        max_wait_seconds: temps max d'attente de fin d'indexation (defaut 25 s).
-                          Passe ce delai, les resultats partiels sont renvoyes.
-    """
+    """Search Synology files through the asynchronous FileStation search API."""
     started = await _dsm_call(
         "SYNO.FileStation.Search", "start", 2,
         {"folder_path": folder_path, "pattern": pattern, "recursive": recursive},
@@ -2743,7 +2424,7 @@ async def dsm_file_search(
 
 @mcp.tool()
 async def dsm_download_list(limit: int = 20, offset: int = 0) -> dict[str, Any]:
-    """Liste les taches Download Station (statut, taille, progression, vitesse)."""
+    """List Synology Download Station tasks, progress, and transfer speed."""
     result = await _dsm_call(
         "SYNO.DownloadStation2.Task", "list", 2,
         {"offset": offset, "limit": max(1, min(200, limit)), "additional": ["detail", "transfer"]},
@@ -2782,13 +2463,7 @@ async def dsm_download_create(
     urls: list[str],
     destination: Optional[str] = None,
 ) -> dict[str, Any]:
-    """[ECRITURE] Cree une ou plusieurs taches Download Station a partir d'URL.
-
-    Args:
-        urls: liste d'URL (http/https/ftp/magnet).
-        destination: dossier partage cible SANS slash initial, ex 'Downloads'.
-                     None = destination par defaut de Download Station.
-    """
+    """Create one or more Synology Download Station tasks from URLs."""
     if not urls:
         return {"success": False, "error": "aucune URL fournie"}
     params: dict[str, Any] = {"type": "url", "url": urls, "create_list": False}
@@ -2806,13 +2481,7 @@ async def dsm_download_control(
     task_ids: list[str],
     delete_downloaded_files: bool = False,
 ) -> dict[str, Any]:
-    """[ECRITURE] Met en pause, reprend ou supprime des taches Download Station.
-
-    Args:
-        action: pause | resume | delete.
-        task_ids: liste d'identifiants, ex ['dbid_1576'] (voir dsm_download_list).
-        delete_downloaded_files: sur delete, supprime aussi les fichiers deja recus.
-    """
+    """Pause, resume, or delete Synology Download Station tasks."""
     if not task_ids:
         return {"success": False, "error": "aucun task_id fourni"}
     params: dict[str, Any] = {"id": task_ids}
@@ -2834,28 +2503,13 @@ async def dsm_api(
     params: Optional[dict] = None,
     json_style: bool = False,
 ) -> dict[str, Any]:
-    """Appel brut de l'API web DSM (echappatoire pour tout ce qui n'est pas wrappe).
-
-    Args:
-        api: nom de l'API, ex 'SYNO.Core.Share.Snapshot'.
-        method: methode, ex 'list'.
-        version: version d'API (voir SYNO.API.Info).
-        params: parametres additionnels.
-        json_style: True pour les API DownloadStation2 v2 (valeurs serialisees en JSON).
-
-    Pour decouvrir les API disponibles :
-      dsm_api(api='SYNO.API.Info', method='query', version=1, params={'query':'all'})
-    """
+    """Call a Synology DSM API method not covered by a dedicated tool."""
     return await _dsm_call(api, method, version, params, timeout=60.0, json_style=json_style)
 
 
 @mcp.tool()
 async def dsm_relogin() -> dict[str, Any]:
-    """Force une nouvelle session DSM (invalide le SID en cache).
-
-    Utile apres rotation du mot de passe dans Vaultwarden ou apres un redemarrage
-    du NAS : evite un restart du hub.
-    """
+    """Invalidate the cached DSM session and authenticate again."""
     try:
         sid = await _dsm_login(force_refresh=True)
         return {"success": True, "sid_prefix": sid[:6] + "...", "endpoint": DSM_WEBAPI_BASE}
@@ -2944,20 +2598,7 @@ async def ct_exec(
     shell: str = "bash",
     timeout_seconds: int = DEFAULT_TIMEOUT,
 ) -> dict[str, Any]:
-    """Execute une commande DANS un conteneur LXC en preservant $VAR et $(...).
-
-    Contrairement a proxmox_ct_exec / batch_exec (ou l'expansion se fait sur le
-    shell de l'HOTE), la commande est encodee en base64 et decodee A L'INTERIEUR
-    du conteneur -> aucune interpretation cote hote. Ideal pour tout script avec
-    substitution, guillemets ou sauts de ligne (fin de la danse pct exec heredoc).
-
-    Args:
-        ctid: ID du conteneur LXC sur l'hyperviseur.
-        command: script shell complet (peut contenir $VAR, $(...), quotes, \n).
-        host: hyperviseur qui heberge le CT (defaut MCP_DEFAULT_HYPERVISOR).
-        shell: 'bash' (defaut) ou 'sh' pour l'interpretation DANS le CT.
-        timeout_seconds: plafond d'execution.
-    """
+    """Run a script inside an LXC container without host-side variable expansion."""
     interp = "sh" if shell.lower() in ("sh", "ash", "dash", "busybox") else "bash"
     cmd = _ct_run_cmd(ctid, command, interp)
     return await _with_tool(
@@ -2976,17 +2617,7 @@ async def ct_write_file(
     mode: Optional[str] = None,
     make_parents: bool = True,
 ) -> dict[str, Any]:
-    """Ecrit un fichier DANS un conteneur LXC (contenu encode base64, decode
-    dans le CT) -> pas de 'pct push', pas d'expansion cote hote, multi-lignes OK.
-
-    Args:
-        ctid: ID du conteneur.
-        path: chemin absolu du fichier dans le CT.
-        content: contenu integral (texte).
-        host: hyperviseur (defaut MCP_DEFAULT_HYPERVISOR).
-        mode: chmod optionnel, ex '600', '755'.
-        make_parents: cree l'arborescence parente (mkdir -p) si besoin.
-    """
+    """Write base64-encoded content to a file inside an LXC container."""
     parent = os.path.dirname(path) or "/"
     parts = []
     if make_parents:
@@ -3085,14 +2716,7 @@ async def job_run(
     as_root: bool = False,
     label: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Lance une commande LONGUE en tache de fond (detachee), renvoie un job_id.
-    Remplace le pattern 'nohup ... & + tail du log' : on lance UNE fois, puis on
-    interroge job_status / job_logs (lecture INCREMENTALE) au lieu de relire un
-    log qui grossit -> forte economie de tokens.
-
-    host=None -> execute sur le hub. Sinon nom d'un host de hosts.yaml.
-    Les artefacts vivent dans /tmp/mcp-jobs/<job_id>/ sur la cible.
-    """
+    """Start a long-running command as a detached background job and return its job ID."""
     job_id = _uuid.uuid4().hex[:12]
     launcher = (
         _JOB_LAUNCHER
@@ -3126,8 +2750,7 @@ def _parse_kv_lines(text):
 
 @mcp.tool()
 async def job_status(job_id: str) -> dict[str, Any]:
-    """Etat d'un job (running|done|dead|missing) + code retour + taille du log,
-    SANS renvoyer le log entier. Voir job_logs pour le contenu."""
+    """Return background-job state, exit code, and log size without returning the full log."""
     meta = _job_lookup(job_id) or {"host": None, "as_root": False, "label": None}
     probe = _JOB_PROBE.replace("__JOBID__", job_id)
     res = await _with_tool(
@@ -3148,9 +2771,7 @@ async def job_status(job_id: str) -> dict[str, Any]:
 
 @mcp.tool()
 async def job_logs(job_id: str, from_line: int = 0, max_lines: int = 300) -> dict[str, Any]:
-    """Renvoie les lignes du log d'un job A PARTIR de from_line (0-based),
-    au plus max_lines. Renvoie next_line = curseur pour l'appel suivant
-    (lecture incrementale : ne relit jamais ce qui a deja ete lu)."""
+    """Return a bounded, incremental range of background-job log lines."""
     meta = _job_lookup(job_id) or {"host": None, "as_root": False}
     from_line = max(0, int(from_line))
     max_lines = max(1, min(int(max_lines), 5000))
@@ -3175,7 +2796,7 @@ async def job_logs(job_id: str, from_line: int = 0, max_lines: int = 300) -> dic
 
 @mcp.tool()
 async def job_list(limit: int = 20) -> dict[str, Any]:
-    """Liste les derniers jobs enregistres (job_id, host, label, date)."""
+    """List recently recorded background jobs with target, label, and creation time."""
     try:
         con = sqlite3.connect(STATE_DB)
         con.execute(
@@ -3209,14 +2830,7 @@ _TOPO_OVERLAY = config.load_topology()
 
 @mcp.tool()
 async def topology(refresh: bool = False, live: bool = True) -> dict[str, Any]:
-    """Source CANONIQUE de la topologie : mapping CT<->IP<->role<->hote, tunnels,
-    pieges d'IP recyclees, et liste 'ne pas toucher'. Evite de re-decouvrir
-    l'infra a chaque session et la classe d'erreurs 'CT 107' / IP recyclees.
-
-    live=True fusionne l'etat on/off reel (pct/qm list sur chaque hyperviseur
-    declare dans hosts.yaml).
-    Resultat cache 10 min (refresh=True pour forcer).
-    """
+    """Return the canonical mapping of containers, addresses, roles, hosts, tunnels, and warnings."""
     cached = None if refresh else _kv_get("topology", 600)
     if cached and not refresh:
         cached["_cache"] = "hit"
@@ -3256,17 +2870,7 @@ async def destroy_resource(
     confirm_token: Optional[str] = None,
     purge: bool = False,
 ) -> dict[str, Any]:
-    """Suppression GARDEE en 2 temps (anti-erreur type 'Portainer restaure/detruit
-    par erreur'). 1er appel SANS confirm_token : resout la cible et renvoie un
-    resume + un token, NE DETRUIT RIEN. 2e appel AVEC le token : detruit.
-
-    Args:
-        kind: 'ct' (pct destroy) | 'vm' (qm destroy).
-        ident: VMID du guest (ex '106').
-        host: hyperviseur (defaut MCP_DEFAULT_HYPERVISOR).
-        confirm_token: token renvoye au 1er appel.
-        purge: ajoute --purge (retire des jobs/replications + disques non references).
-    """
+    """Destroy a Proxmox VM or container through a guarded two-step flow. The first call returns a short-lived confirmation token; the second applies the exact plan."""
     kind = kind.lower()
     if kind not in ("ct", "vm"):
         return {"error": "kind doit etre 'ct' ou 'vm'"}
@@ -3321,9 +2925,7 @@ async def destroy_resource(
 # ============================================================================
 @mcp.tool()
 async def ssh_reset_control(host: str) -> dict[str, Any]:
-    """Ferme la connexion SSH maitre en cache (ControlMaster) pour un host.
-    A lancer apres un changement de shell/IP sur la cible (piege documente :
-    les commandes reutilisent sinon l'ancienne session)."""
+    """Close a cached SSH ControlMaster connection for one configured host."""
     hi = _get_host(host)
     port = hi.get("port", 22)
     cp = config.SSH_CONTROL_PATH
@@ -3335,9 +2937,7 @@ async def ssh_reset_control(host: str) -> dict[str, Any]:
 
 @mcp.tool()
 async def dhcp_reservations(only_online: bool = False) -> dict[str, Any]:
-    """Reservations DHCP du routeur ASUS (nvram dhcp_staticlist) croisees avec
-    les noms (custom_clientlist) et la presence reelle (ARP). Read-only.
-    Remplace le travail manuel repete de parsing nvram + arp."""
+    """Return router DHCP reservations correlated with the configured inventory."""
     cmd = ("nvram get dhcp_staticlist; echo '===CLIENTLIST==='; "
            "nvram get custom_clientlist; echo '===ARP==='; cat /proc/net/arp")
     r = await _with_tool("dhcp_reservations", _ssh_run("router", cmd, as_root=False, timeout=20))
@@ -3473,16 +3073,7 @@ async def notion_append_table_row(
     cells: Optional[list] = None,
     rows: Optional[list] = None,
 ) -> dict[str, Any]:
-    """Ajoute une ou plusieurs lignes a un bloc TABLE Notion (append de blocs
-    table_row). C'est LA bonne methode : ne reecrit pas toute la table et evite
-    le piege documente (insertion via update_content avec \\n = table cassee).
-
-    Args:
-        table_block_id: ID du bloc `table` lui-meme (PAS la page).
-        cells: liste de chaines pour UNE ligne. Le nombre de cellules doit
-               correspondre a la largeur (table_width) de la table.
-        rows: liste de lignes (chaque ligne = liste de chaines) pour un batch.
-    """
+    """Append one or more rows to a Notion table block."""
     all_rows = []
     if cells is not None:
         all_rows.append(cells)
@@ -3512,16 +3103,7 @@ async def endpoints_health(
     include_intermittent: bool = False,
     timeout_seconds: int = 6,
 ) -> dict[str, Any]:
-    """Sonde HTTP (read-only) l'etat de sante des services cles depuis le hub :
-    code HTTP + latence par endpoint. Complement d'infra_snapshot (que je laisse
-    inchange). 'ok' = 200<=code<400 (ex netalertx 302 = ok).
-
-    Args:
-        targets: liste optionnelle d'objets {name,url} pour remplacer la liste
-                 par defaut (celle de endpoints.yaml).
-        include_intermittent: ajoute la liste `intermittent` de endpoints.yaml.
-        timeout_seconds: timeout par endpoint (defaut 6).
-    """
+    """Probe configured HTTP service endpoints from the hub without following redirects."""
     eps = targets if targets else (
         _HEALTH_ENDPOINTS + (_HEALTH_ENDPOINTS_INTERMITTENT if include_intermittent else [])
     )

@@ -37,6 +37,8 @@ Fixed / Security.
   staging tests while production defaults remain unchanged.
 - Tool modularisation has started with `list_hosts` moved to
   `tools/inventory.py` while preserving its public MCP name and schema.
+- All model-facing tool descriptions are now in English, with a CI guard
+  preventing missing descriptions or French text from being reintroduced.
 
 ## [0.2.0] - 2026-07-28
 
