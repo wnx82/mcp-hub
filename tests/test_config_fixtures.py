@@ -61,6 +61,18 @@ class ConfigurationFixtureTests(unittest.TestCase):
         self.assertIn("backup", hosts["nas"]["tags"])
         self.assertTrue(hosts["nas"]["hostname"].endswith(".example.lan"))
 
+    def test_guarded_topology_maps_guests_and_warnings(self) -> None:
+        with mock.patch.object(
+            config, "TOPOLOGY_FILE", EXAMPLES / "topology.guarded.yaml"
+        ):
+            topology = config.load_topology()
+
+        self.assertEqual(
+            "reverse-proxy", topology["prox"]["guests"]["ct/100"]["name"]
+        )
+        self.assertIn("192.0.2.21", topology["_traps"])
+        self.assertEqual(2, len(topology["_do_not_touch"]))
+
 
 if __name__ == "__main__":
     unittest.main()

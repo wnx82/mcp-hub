@@ -111,7 +111,7 @@
 
 - [x] Verifier que les fichiers `.example` couvrent bien toutes les options documentees dans le README
 - [x] Ajouter un exemple minimal mais realiste de `hosts.yaml`
-- [ ] Ajouter un exemple d'usage de `topology.yaml` pour illustrer le mapping des guests et les protections "do-not-touch"
+- [x] Ajouter un exemple d'usage de `topology.yaml` pour illustrer le mapping des guests et les protections "do-not-touch"
 - [ ] Ajouter un exemple de `endpoints.yaml` pour montrer comment configurer `endpoints_health`
 
 ## Qualite produit

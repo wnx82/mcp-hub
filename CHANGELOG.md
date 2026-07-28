@@ -34,6 +34,8 @@ Fixed / Security.
   and tests verify the README links and load all YAML examples.
 - A copy-ready minimal host inventory demonstrates a realistic hypervisor and
   storage host without including private infrastructure details.
+- A focused topology example maps Proxmox guests and documents stale-address
+  traps, do-not-touch guidance, and its access-control limitations.
 - CI now exercises the systemd installer twice in an isolated staging tree,
   verifying installed files and preservation of local configuration.
 - CI builds and installs the wheel in a clean virtualenv, then checks both

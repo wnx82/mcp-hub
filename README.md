@@ -194,6 +194,13 @@ For a copy-ready two-host inventory, start with
 larger [`hosts.example.yaml`](hosts.example.yaml) demonstrates every supported
 host option.
 
+Pair it with
+[`docs/examples/topology.guarded.yaml`](docs/examples/topology.guarded.yaml)
+to map Proxmox guests, record stale-address traps, and surface infrastructure
+that must not be changed casually. The `_do_not_touch` entries are operational
+context for the assistant, not an enforced access-control boundary; use token
+profiles and host restrictions for technical enforcement.
+
 The complete defaults, limits, integration settings, and secret-handling notes
 are in the **[environment variable reference](docs/environment.md)**.
 

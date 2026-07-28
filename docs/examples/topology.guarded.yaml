@@ -1,0 +1,21 @@
+# Curated context for the hosts in hosts.minimal.yaml.
+# Copy this file to topology.yaml and replace the fictional guest details.
+prox:
+  hostname: prox.example.lan
+  role: hypervisor
+  guests:
+    "ct/100":
+      name: reverse-proxy
+      ip: 192.0.2.20
+      note: "public ingress; inspect before restarting"
+    "vm/110":
+      name: home-assistant
+      ip: 192.0.2.30
+      note: "USB passthrough; use the Proxmox VM tools"
+
+_traps:
+  "192.0.2.21": "retired DNS guest; do not trust older notes using this IP"
+
+_do_not_touch:
+  - "vm/110: USB passthrough; never migrate or destroy automatically"
+  - "ct/100: confirm ingress health before any restart"
