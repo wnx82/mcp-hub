@@ -30,6 +30,8 @@ Fixed / Security.
   typed environment parsing, and all YAML-backed inventory loaders.
 - CI now rejects drift between registered MCP tools, the README tool table,
   and the advertised tool count.
+- CI now rejects tracked Python caches, build directories, wheels, source
+  archives, and package metadata.
 
 ### Changed
 

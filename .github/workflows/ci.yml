@@ -82,6 +82,8 @@ jobs:
       - run: ruff check --output-format=github .
       - name: Version and CHANGELOG agree
         run: python scripts/check_version.py
+      - name: Generated artifacts are not tracked
+        run: python scripts/check_repo_hygiene.py
 
   smoke:
     runs-on: ubuntu-latest

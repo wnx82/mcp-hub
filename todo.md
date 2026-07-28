@@ -14,7 +14,7 @@
 
 - [x] Documenter plus clairement la strategie de deploiement supportee: package Python, execution directe, ou installation systemd
 - [x] Ajouter une note de maintenance sur la politique de dependances: `requirements.txt` epingle vs `pyproject.toml` a plage de versions
-- [ ] Nettoyer les artefacts locaux du depot avant release (`__pycache__`, cache Ruff) si necessaire via `.gitignore` et checks
+- [x] Nettoyer les artefacts locaux du depot avant release (`__pycache__`, cache Ruff) si necessaire via `.gitignore` et checks
 - [ ] Ajouter un mini jeu de fixtures de config de test pour verifier les exemples sans toucher a un vrai homelab
 
 ## Securite, fiabilite et extensibilite
