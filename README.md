@@ -190,7 +190,8 @@ hosts:
 
 Tags are how you address groups: `fleet_exec(tag="backup", command="df -h")`.
 
-<!-- TODO: full env var reference table -->
+The complete defaults, limits, integration settings, and secret-handling notes
+are in the **[environment variable reference](docs/environment.md)**.
 
 ## Tool reference
 

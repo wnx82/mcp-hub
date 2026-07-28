@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import unittest
 from pathlib import Path
 
@@ -28,6 +29,26 @@ class DocumentationTests(unittest.TestCase):
         self.assertIn("--transport http", guide)
         self.assertIn("MCP_READ_ONLY=true", guide)
         self.assertNotIn("Bearer changeme", guide)
+
+    def test_environment_reference_covers_every_runtime_variable(self) -> None:
+        sources = (
+            (ROOT / "config.py").read_text(encoding="utf-8")
+            + (ROOT / "server.py").read_text(encoding="utf-8")
+        )
+        runtime = set(
+            re.findall(
+                r'(?:env|env_bool|env_int|env_path)\("([A-Z][A-Z0-9_]+)"',
+                sources,
+            )
+        )
+        runtime.update(
+            re.findall(r'os\.environ\.get\("([A-Z][A-Z0-9_]+)"', sources)
+        )
+        reference = (ROOT / "docs" / "environment.md").read_text(encoding="utf-8")
+        documented = set(
+            re.findall(r"^\| `([A-Z][A-Z0-9_]+)` \|", reference, re.MULTILINE)
+        )
+        self.assertEqual(runtime, documented)
 
 
 if __name__ == "__main__":

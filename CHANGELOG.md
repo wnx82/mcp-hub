@@ -26,6 +26,8 @@ Fixed / Security.
   confirmation, correction, and verification troubleshooting session.
 - A complete Claude Code connection guide covers private and project scopes,
   bearer-token handling, verification, troubleshooting, and Desktop limits.
+- A complete environment reference documents every runtime variable, default,
+  secret classification, and operational purpose.
 - CI now exercises the systemd installer twice in an isolated staging tree,
   verifying installed files and preservation of local configuration.
 - CI builds and installs the wheel in a clean virtualenv, then checks both
