@@ -126,6 +126,11 @@ jobs:
           assert 'read-only' in str(r), r
           print("read-only guard holds")
           PY
+      - name: Tool registration and README agree
+        env:
+          MCP_HUB_HOME: ${{ github.workspace }}
+          MCP_READ_ONLY: "true"
+        run: python scripts/check_tool_docs.py
 
   secrets:
     runs-on: ubuntu-latest

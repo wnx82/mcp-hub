@@ -8,7 +8,7 @@
 - [x] Decouper progressivement `server.py` en modules `tools/*` pour reduire le risque de regression dans le monolithe
 - [ ] Uniformiser les docstrings encore en francais vers l'anglais pour garder une interface modele coherente
 - [x] Ajouter des tests cibles pour les helpers critiques: redaction, garde `READ_ONLY`, chargement de config et inventaire YAML
-- [ ] Ajouter une verification automatique entre les tools exposes et la documentation du README pour eviter les derives
+- [x] Ajouter une verification automatique entre les tools exposes et la documentation du README pour eviter les derives
 
 ## Audit secondaire
 
@@ -116,5 +116,5 @@
 
 ## Qualite produit
 
-- [ ] Confirmer dans le README que le nombre de tools annonce ("85 tools") reste exact au fil des releases
+- [x] Confirmer dans le README que le nombre de tools annonce ("85 tools") reste exact au fil des releases
 - [ ] Ajouter une section de parcours types ("diagnostiquer un service", "verifier un tunnel", "agir en read-only puis lever la protection")

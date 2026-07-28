@@ -28,6 +28,8 @@ Fixed / Security.
   console commands and imports from outside the source checkout.
 - Targeted tests now cover secret redaction, the global read-only guard,
   typed environment parsing, and all YAML-backed inventory loaders.
+- CI now rejects drift between registered MCP tools, the README tool table,
+  and the advertised tool count.
 
 ### Changed
 
