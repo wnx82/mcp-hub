@@ -39,6 +39,8 @@ Fixed / Security.
   `tools/inventory.py` while preserving its public MCP name and schema.
 - All model-facing tool descriptions are now in English, with a CI guard
   preventing missing descriptions or French text from being reintroduced.
+- The README now distinguishes development, direct-source, and recommended
+  systemd deployment modes and documents their operational responsibilities.
 
 ## [0.2.0] - 2026-07-28
 

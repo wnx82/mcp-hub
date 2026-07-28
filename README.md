@@ -34,6 +34,7 @@ your assistant at it.
 
 - [Features](#features)
 - [Quick start](#quick-start)
+- [Deployment](#deployment)
 - [Rescue diagnostics](#rescue-diagnostics)
 - [Configuration](#configuration)
 - [Tool reference](#tool-reference)
@@ -95,6 +96,27 @@ and installs the unit. It is idempotent and never overwrites existing config.
 See [deploy/](deploy/).
 
 <!-- TODO: worked example — connecting from Claude Desktop / Claude Code -->
+
+## Deployment
+
+MCP Hub supports three execution modes:
+
+| Mode | Intended use | Command | Support level |
+|---|---|---|---|
+| Editable package | Development and contributions | `pip install -e ".[dev]"` then `mcp-hub` | Supported for development |
+| Direct source execution | Quick local evaluation | `python server.py` | Supported, operator manages the process |
+| systemd installation | Persistent homelab deployment | `sudo ./deploy/install.sh` | Recommended for production |
+
+The Python package and direct execution use the current checkout and its
+virtualenv. They do not create a service account, SSH key, environment file, or
+restart policy. The systemd installer provisions those operational pieces,
+keeps local configuration intact when rerun, and installs Rescue outside the
+hub virtualenv.
+
+Container images are not an official deployment target yet. The hub needs
+network access, an SSH identity, persistent `state.db`, and access to its local
+inventory; operators packaging it in a container must preserve those
+properties themselves.
 
 ## Rescue diagnostics
 
