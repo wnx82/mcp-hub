@@ -138,6 +138,11 @@ jobs:
           MCP_HUB_HOME: ${{ github.workspace }}
           MCP_READ_ONLY: "true"
         run: python scripts/check_tool_docstrings.py
+      - name: Tool behavior annotations are complete
+        env:
+          MCP_HUB_HOME: ${{ github.workspace }}
+          MCP_READ_ONLY: "true"
+        run: python scripts/check_tool_annotations.py
 
   secrets:
     runs-on: ubuntu-latest

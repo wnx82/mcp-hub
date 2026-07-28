@@ -36,6 +36,8 @@ Fixed / Security.
   archives, and package metadata.
 - `plan_mutation` and `confirm_mutation` provide short-lived, profile-bound,
   one-time confirmation for exact mutating calls.
+- Every registered tool now publishes MCP `readOnlyHint`, `destructiveHint`,
+  `idempotentHint`, and `openWorldHint` behavior annotations.
 
 ### Changed
 

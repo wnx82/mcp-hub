@@ -30,6 +30,7 @@ import httpx
 import yaml
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import ToolAnnotations
 
 import config
 from _version import __version__
@@ -453,8 +454,6 @@ def _access_refusal(profile, fn, args, kwargs) -> dict[str, Any] | None:
 
 
 def _guarded_tool(*d_args, **d_kwargs):
-    decorate = _register_tool(*d_args, **d_kwargs)
-
     def wrapper(fn):
         if fn.__name__ in config.MUTATING_TOOLS and fn.__name__ != "confirm_mutation":
             _mutating_functions[fn.__name__] = fn
@@ -487,6 +486,19 @@ def _guarded_tool(*d_args, **d_kwargs):
             result = fn(*args, **kwargs)
             return await result if inspect.isawaitable(result) else result
 
+        tool_kwargs = dict(d_kwargs)
+        if "annotations" not in tool_kwargs:
+            read_only = fn.__name__ not in config.MUTATING_TOOLS
+            tool_kwargs["annotations"] = ToolAnnotations(
+                readOnlyHint=read_only,
+                destructiveHint=(
+                    fn.__name__ in config.DESTRUCTIVE_TOOLS
+                    or fn.__name__ == "confirm_mutation"
+                ),
+                idempotentHint=read_only and fn.__name__ != "plan_mutation",
+                openWorldHint=True,
+            )
+        decorate = _register_tool(*d_args, **tool_kwargs)
         return decorate(guarded)
 
     return wrapper
