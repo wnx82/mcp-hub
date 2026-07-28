@@ -44,7 +44,7 @@ your assistant at it.
 
 ## Features
 
-- **89 tools**, one endpoint, one config file.
+- **93 tools**, one endpoint, one config file.
 - **Config-driven.** Your network lives in `hosts.yaml` and `.env`. Nothing about
   your infrastructure is baked into the code.
 - **Multiplexed SSH.** Persistent control sockets, so fleet-wide commands take
@@ -202,7 +202,13 @@ and audit trail as every other call.
 | **Notion** | `notion_search` `notion_get_page` `notion_create_page` `notion_update_page` `notion_archive_page` `notion_query_database` `notion_get_block_children` `notion_append_blocks` `notion_append_table_row` `notion_delete_block` `notion_reload_token` |
 | **Vault** | `vault_search` `vault_get_item` `vault_get_field` `vault_create_item` `vault_update_item` `vault_list_folders` |
 | **LM Studio** | `lmstudio_status` `lmstudio_load` `lmstudio_unload` |
+| **Guided diagnostics** | `diagnose_service` `diagnose_endpoint` `audit_host` `check_backup_chain` |
 | **Jobs & introspection** | `job_run` `job_status` `job_list` `job_logs` `mcp_health` `mcp_stats` `audit_export` `plan_mutation` `confirm_mutation` `rollback_change` |
+
+Guided diagnostics always stop after observation. They return evidence,
+assessment, and suggested next steps with `correction_applied: false`;
+`check_backup_chain` is a freshness and storage signal, not proof that a restore
+will succeed.
 
 ## Security
 

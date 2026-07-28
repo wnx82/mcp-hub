@@ -44,6 +44,8 @@ Fixed / Security.
   size bounds, per-target concurrency, mutation cooldowns, and circuit breakers.
 - `rollback_change` restores one profile-bound snapshot for Cloudflare tunnel
   configuration, supported Notion page fields, or bounded LXC file writes.
+- Observation-only `diagnose_service`, `diagnose_endpoint`, `audit_host`, and
+  `check_backup_chain` playbooks return evidence before suggesting correction.
 
 ### Changed
 

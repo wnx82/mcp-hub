@@ -37,6 +37,12 @@ from _version import __version__
 from core.limits import LimitLease, ResourceLimiter
 from core.snapshots import SnapshotStore
 from tools.inventory import list_hosts as list_hosts_tool
+from tools.playbooks import (
+    backup_chain_command,
+    host_audit_command,
+    parse_sections,
+    service_diagnostic_command,
+)
 
 # --- Config (see config.py / .env.example) ---
 BASE_DIR = config.HUB_HOME
@@ -3573,6 +3579,208 @@ async def endpoints_health(
     return {
         "summary": {"total": len(results), "up": up, "down": len(results) - up},
         "endpoints": results,
+    }
+
+
+@mcp.tool()
+async def diagnose_service(
+    service: str,
+    host: Optional[str] = None,
+    journal_lines: int = 50,
+) -> dict[str, Any]:
+    """Observe one systemd service and suggest next steps without changing it."""
+    try:
+        command = service_diagnostic_command(service, journal_lines)
+    except ValueError as exc:
+        return {"error": str(exc)}
+    if host:
+        result = await _with_tool(
+            "diagnose_service",
+            _ssh_run(host, command, as_root=False, timeout=30),
+        )
+    else:
+        result = await _with_tool(
+            "diagnose_service",
+            _local_run(command, as_root=False, timeout=30),
+        )
+    observations = parse_sections(
+        result.get("stdout", ""),
+        ("ACTIVE", "STATE", "JOURNAL"),
+    )
+    active = observations["active"].splitlines()[:1]
+    state = active[0] if active else "unknown"
+    suggestions = (
+        ["inspect the captured journal and unit configuration before any restart"]
+        if state != "active"
+        else ["no correction suggested; continue monitoring if symptoms persist"]
+    )
+    return {
+        "phase": "observation",
+        "service": service,
+        "host": host or "hub",
+        "assessment": {"active_state": state, "healthy": state == "active"},
+        "observations": observations,
+        "suggested_next_steps": suggestions,
+        "correction_applied": False,
+    }
+
+
+@mcp.tool()
+async def diagnose_endpoint(
+    endpoint: str,
+    timeout_seconds: int = 6,
+) -> dict[str, Any]:
+    """Probe one configured endpoint and explain failures without changing routing."""
+    configured = _HEALTH_ENDPOINTS + _HEALTH_ENDPOINTS_INTERMITTENT
+    match = next(
+        (
+            item for item in configured
+            if item.get("name") == endpoint or item.get("url") == endpoint
+        ),
+        None,
+    )
+    if match is None:
+        return {
+            "error": "endpoint must match a configured name or URL",
+            "available": sorted(str(item.get("name")) for item in configured),
+        }
+    timeout = max(1, min(int(timeout_seconds), 20))
+    url = str(match["url"])
+    started = time.monotonic()
+    try:
+        async with httpx.AsyncClient(
+            timeout=timeout,
+            follow_redirects=False,
+        ) as client:
+            response = await client.get(url)
+        latency_ms = int((time.monotonic() - started) * 1000)
+        healthy = 200 <= response.status_code < 400
+        observations = {
+            "url": url,
+            "status": response.status_code,
+            "latency_ms": latency_ms,
+            "location": response.headers.get("location"),
+            "server": response.headers.get("server"),
+        }
+        suggestion = (
+            "no correction suggested"
+            if healthy
+            else "inspect the upstream service, proxy route, and recent logs"
+        )
+    except Exception as exc:
+        healthy = False
+        observations = {
+            "url": url,
+            "status": None,
+            "latency_ms": int((time.monotonic() - started) * 1000),
+            "failure_type": type(exc).__name__,
+            "failure": str(exc)[:300],
+        }
+        suggestion = "verify DNS, TLS, routing, and upstream service health"
+    return {
+        "phase": "observation",
+        "endpoint": match.get("name") or url,
+        "assessment": {"healthy": healthy},
+        "observations": observations,
+        "suggested_next_steps": [suggestion],
+        "correction_applied": False,
+    }
+
+
+@mcp.tool()
+async def audit_host(host: str) -> dict[str, Any]:
+    """Collect bounded host capacity and failure signals without changing the host."""
+    result = await _with_tool(
+        "audit_host",
+        _ssh_run(host, host_audit_command(), as_root=False, timeout=30),
+    )
+    observations = parse_sections(
+        result.get("stdout", ""),
+        ("UPTIME", "DISK", "MEMORY", "FAILED_UNITS", "REBOOT_REQUIRED"),
+    )
+    warnings = []
+    for line in observations["disk"].splitlines()[1:]:
+        columns = line.split()
+        if len(columns) >= 5 and columns[4].rstrip("%").isdigit():
+            if int(columns[4].rstrip("%")) >= 90:
+                warnings.append(f"filesystem usage is high: {line}")
+    if observations["failed_units"]:
+        warnings.append("systemd reports failed units")
+    if observations["reboot_required"] != "no":
+        warnings.append("host reports that a reboot is required")
+    return {
+        "phase": "observation",
+        "host": host,
+        "assessment": {"healthy": not warnings, "warnings": warnings},
+        "observations": observations,
+        "suggested_next_steps": [
+            "review warnings and gather service-specific evidence before correction"
+        ],
+        "correction_applied": False,
+    }
+
+
+@mcp.tool()
+async def check_backup_chain(
+    host: str = DEFAULT_HOST,
+    ctid: int = 108,
+    datastore: str = "/mnt/datastore-hdd",
+    maximum_age_hours: int = 48,
+) -> dict[str, Any]:
+    """Observe backup storage and newest snapshot age without pruning or restoring."""
+    try:
+        script = backup_chain_command(datastore)
+    except ValueError as exc:
+        return {"error": str(exc)}
+    result = await _with_tool(
+        "check_backup_chain",
+        _ssh_run(
+            host,
+            _ct_run_cmd(ctid, script),
+            as_root=True,
+            timeout=30,
+        ),
+    )
+    observations = parse_sections(
+        result.get("stdout", ""),
+        ("DATASTORE", "SPACE", "LATEST"),
+    )
+    latest_line = observations["latest"].splitlines()[:1]
+    latest: dict[str, Any] | None = None
+    if latest_line:
+        timestamp, _, path = latest_line[0].partition(" ")
+        try:
+            age_hours = max(0.0, (time.time() - float(timestamp)) / 3600)
+            latest = {
+                "path": path,
+                "age_hours": round(age_hours, 1),
+            }
+        except ValueError:
+            latest = None
+    maximum_age = max(1, min(int(maximum_age_hours), 24 * 30))
+    healthy = (
+        observations["datastore"] == "present"
+        and latest is not None
+        and latest["age_hours"] <= maximum_age
+    )
+    return {
+        "phase": "observation",
+        "host": host,
+        "ctid": ctid,
+        "assessment": {
+            "healthy": healthy,
+            "maximum_age_hours": maximum_age,
+            "latest": latest,
+        },
+        "observations": observations,
+        "suggested_next_steps": [
+            (
+                "no correction suggested"
+                if healthy
+                else "inspect backup jobs and datastore availability before any repair"
+            )
+        ],
+        "correction_applied": False,
     }
 
 
