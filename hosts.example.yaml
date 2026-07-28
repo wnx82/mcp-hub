@@ -1,0 +1,51 @@
+# =============================================================================
+# MCP Hub — fleet inventory (example)
+#
+#   cp hosts.example.yaml hosts.yaml
+#
+# hosts.yaml is git-ignored: it describes your private network. Only this
+# example is tracked.
+#
+# Every host listed here is reachable over SSH by the hub, using the key at
+# MCP_SSH_KEY. Anything in this file is, in effect, in the blast radius of the
+# hub. List only what you intend an LLM to be able to reach.
+# =============================================================================
+
+hosts:
+  # --- key = the short name tools refer to (remote_exec(host="nas"), ...) ----
+  nas:
+    hostname: nas.example.lan     # IP or resolvable name
+    user: admin                   # SSH user
+    port: 22                      # optional, default 22
+    role: storage                 # free-form, shown in list_hosts()/topology()
+    tags: [nas, synology, backup] # free-form, used to target fleet_exec()
+    mac: "aa:bb:cc:dd:ee:01"      # optional, enables wake_host()
+
+  hypervisor:
+    hostname: 192.0.2.10
+    user: root
+    role: hypervisor
+    tags: [proxmox, lxc, critical]
+
+  workstation:
+    hostname: workstation.example.lan
+    user: alice
+    role: workstation
+    tags: [desktop, gpu, lmstudio]
+    mac: "aa:bb:cc:dd:ee:02"
+
+  # --- a host whose default shell is not POSIX sh ----------------------------
+  router:
+    hostname: 192.0.2.1
+    user: admin
+    role: network
+    shell: ash                    # optional: sh (default), bash, ash, busybox
+    tags: [network, openwrt]
+
+  # --- a public VPS ----------------------------------------------------------
+  vps:
+    hostname: vps.example.com
+    user: deploy
+    port: 2222
+    role: vps
+    tags: [public, docker, edge]

@@ -1,0 +1,59 @@
+name: Bug report
+description: Something behaves differently than documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not paste real hostnames, IPs, tokens or vault UUIDs.** Redact
+        them, or use `192.0.2.x` / `example.com`.
+
+        For a security vulnerability, do not open an issue — see
+        [SECURITY.md](../blob/main/SECURITY.md).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Include the tool you called and the response you got.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Set ... in .env
+        2. Call tool ... with ...
+        3. See error
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: MCP Hub version / commit
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version and OS
+      placeholder: "3.12.3, Debian 12"
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant configuration
+      description: Which integrations are enabled, read-only on or off. Redact secrets.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Output from `journalctl -u mcp-hub` around the failure. Redact secrets.
+      render: shell

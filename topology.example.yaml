@@ -1,0 +1,56 @@
+# =============================================================================
+# MCP Hub — curated topology overlay (OPTIONAL)
+#
+#   cp topology.example.yaml topology.yaml
+#
+# Entirely optional: with no topology.yaml, the `topology` tool simply returns
+# the live scan of the hypervisors declared in hosts.yaml.
+#
+# What belongs here is the knowledge a live scan cannot recover — which guest
+# is really which, which IPs have been recycled and now mislead, and what must
+# never be touched. Its purpose is to stop the assistant re-deriving (and
+# mis-deriving) your infrastructure at the start of every session.
+#
+# topology.yaml is git-ignored. Only this example is tracked.
+# =============================================================================
+
+# --- One block per hypervisor. Keys should match hosts.yaml entries. --------
+hypervisor:
+  hostname: 192.0.2.10
+  role: hypervisor
+  guests:
+    "ct/100":
+      name: docker
+      ip: 192.0.2.20
+      note: "runs the Docker workloads - pass ctid=100 to docker_ps"
+    "ct/101":
+      name: dns
+      ip: 192.0.2.21
+    "vm/110":
+      name: homeassistant
+      ip: 192.0.2.30
+      note: "= host `ha` in hosts.yaml"
+
+nas:
+  hostname: 192.0.2.11
+  role: nas-hypervisor
+  intermittent: true          # tools tolerate this host being off
+  guests:
+    "vm/100":
+      name: DSM
+      ip: 192.0.2.40
+      note: "data NOT backed up - known gap"
+
+# --- Recycled or misleading IPs. Free-form; surfaced verbatim to the model. --
+_traps:
+  "192.0.2.20": "CT 100 docker, NOT the observability container."
+  "192.0.2.21": "reassigned 2026-05; older notes point elsewhere."
+
+# --- Hard 'do not touch' list. The assistant is expected to respect this. ----
+_do_not_touch:
+  - "vm/100 DSM: disk passthrough, irreplaceable data, no backup"
+  - "ct/101 dns: taking it down blackholes the whole network"
+
+# --- Cloudflare tunnel ids, for cross-referencing ingress ---------------------
+_tunnels:
+  main: "00000000-0000-0000-0000-000000000000 (edge tunnel)"

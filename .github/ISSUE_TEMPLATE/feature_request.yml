@@ -1,0 +1,40 @@
+name: Feature request
+description: Suggest a new tool, integration, or behaviour
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: The task you want your assistant to handle, not the implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - New tool on an existing integration
+        - New integration
+        - Configuration or deployment
+        - Security hardening
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: checkboxes
+    id: mutating
+    attributes:
+      label: Safety
+      options:
+        - label: This would mutate remote state (and so must respect MCP_READ_ONLY)
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered

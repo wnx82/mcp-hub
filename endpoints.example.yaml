@@ -1,0 +1,33 @@
+# =============================================================================
+# MCP Hub — HTTP health probes for `endpoints_health` (OPTIONAL)
+#
+#   cp endpoints.example.yaml endpoints.yaml
+#
+# Optional: with no endpoints.yaml, `endpoints_health` probes nothing unless
+# the caller passes an explicit `targets` list.
+#
+# A probe is "ok" when the status code is 200 <= code < 400, so a service that
+# answers 302 on / still counts as up.
+#
+# endpoints.yaml is git-ignored. Only this example is tracked.
+# =============================================================================
+
+# --- Probed on every call ----------------------------------------------------
+endpoints:
+  - name: grafana
+    url: http://192.0.2.25:3000/api/health
+  - name: prometheus
+    url: http://192.0.2.25:9090/-/healthy
+  - name: vaultwarden
+    url: http://192.0.2.20:3080/alive
+  - name: dns
+    url: http://192.0.2.21/
+
+# --- Probed only with include_intermittent=true ------------------------------
+# For services on hosts that are frequently powered down, so a normal health
+# call is not polluted with expected failures.
+intermittent:
+  - name: media
+    url: http://192.0.2.40:32400/identity
+  - name: backup
+    url: https://192.0.2.41:8007/

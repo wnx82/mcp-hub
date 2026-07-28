@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check --output-format=github .
+
+  smoke:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt
+      - name: Import and register every tool
+        env:
+          MCP_HUB_HOME: ${{ github.workspace }}
+          MCP_READ_ONLY: "true"
+        run: |
+          cp hosts.example.yaml hosts.yaml
+          python - <<'PY'
+          import asyncio, server, config
+          tools = asyncio.run(server.mcp.list_tools())
+          names = {t.name for t in tools}
+          assert tools, "no tools registered"
+          missing = config.MUTATING_TOOLS - names
+          assert not missing, f"MUTATING_TOOLS names no real tool: {sorted(missing)}"
+          print(f"{len(tools)} tools registered, {len(config.MUTATING_TOOLS)} guarded")
+          PY
+      - name: Read-only mode must refuse a mutating tool
+        env:
+          MCP_HUB_HOME: ${{ github.workspace }}
+          MCP_READ_ONLY: "true"
+        run: |
+          python - <<'PY'
+          import asyncio, server
+          r = asyncio.run(server.mcp.call_tool('local_exec', {'command': 'echo nope'}))
+          assert 'read-only' in str(r), r
+          print("read-only guard holds")
+          PY
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Reject private network data
+        run: |
+          # Documentation ranges (192.0.2.x, 198.51.100.x, 203.0.113.x) and
+          # loopback are fine; anything else that looks like a real host is not.
+          if grep -rInE '\b(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)[0-9]+\.[0-9]+' \
+               --include='*.py' --include='*.yaml' --include='*.md' --include='*.sh' . ; then
+            echo "::error::private IP address committed"; exit 1
+          fi
+          if git ls-files | grep -E '^(hosts|topology|endpoints)\.yaml$|^\.env$'; then
+            echo "::error::a real config file is tracked"; exit 1
+          fi

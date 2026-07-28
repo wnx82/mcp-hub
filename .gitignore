@@ -1,0 +1,65 @@
+# --- Secrets & local config (NEVER commit) ---------------------------------
+.env
+*.env
+!.env.example
+hosts.yaml
+!hosts.example.yaml
+topology.yaml
+!topology.example.yaml
+endpoints.yaml
+!endpoints.example.yaml
+secrets.yaml
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+known_hosts
+
+# --- Runtime state ----------------------------------------------------------
+state.db
+state.db-journal
+state.db-wal
+state.db-shm
+*.sqlite
+*.sqlite3
+*.log
+logs/
+run/
+*.sock
+
+# --- Backups & scratch ------------------------------------------------------
+*.bak
+*.bak.*
+*.orig
+*.rej
+*~
+.#*
+*.tmp
+scratch/
+
+# --- Python -----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+
+# --- Editors / OS -----------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

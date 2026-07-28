@@ -1,0 +1,50 @@
+# MCP Hub systemd unit.
+#
+#   sudo cp deploy/mcp-hub.service.example /etc/systemd/system/mcp-hub.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now mcp-hub
+#
+# Adjust User/Group and paths to match your install.
+
+[Unit]
+Description=MCP Hub - infrastructure control MCP server
+Documentation=https://github.com/wnx82/mcp-hub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mcphub
+Group=mcphub
+WorkingDirectory=/opt/mcp-hub
+
+# Secrets live here, root-owned, mode 0600. Never inside the git checkout.
+EnvironmentFile=/etc/default/mcp-hub
+
+ExecStart=/opt/mcp-hub/.venv/bin/python /opt/mcp-hub/server.py
+Restart=on-failure
+RestartSec=5s
+
+# --- Hardening -------------------------------------------------------------
+# Deliberately NOT sandboxed away from the network or SSH: the whole point of
+# this service is to reach other machines. These directives limit the damage a
+# compromise of the process itself can do to the local host.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/mcp-hub
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mcp-hub
+
+[Install]
+WantedBy=multi-user.target

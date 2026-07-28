@@ -1,0 +1,41 @@
+# Bitwarden CLI `bw serve` daemon, for MCP_SECRETS_PROVIDER=vaultwarden only.
+#
+#   sudo cp deploy/bw-serve-service.example /etc/systemd/system/bw-serve.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now bw-serve
+#
+# Requires the `bw` CLI and `jq` on PATH for the mcphub user.
+
+[Unit]
+Description=Bitwarden CLI serve daemon for MCP Hub
+After=network-online.target
+Wants=network-online.target
+Before=mcp-hub.service
+
+[Service]
+Type=simple
+User=mcphub
+Group=mcphub
+
+# BW_SERVER / BW_EMAIL / BW_PASSWORD. root-owned, mode 0600.
+EnvironmentFile=/etc/default/bw-serve
+
+ExecStart=/opt/mcp-hub/deploy/bw-serve-start.sh
+Restart=on-failure
+RestartSec=10s
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/mcphub
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bw-serve
+
+[Install]
+WantedBy=multi-user.target

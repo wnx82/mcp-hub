@@ -1,0 +1,6 @@
+# Pinned to the versions this release was developed and tested against.
+# For a looser range, install the package instead: pip install -e .
+mcp==1.28.1
+httpx==0.28.1
+PyYAML==6.0.3
+uvicorn==0.51.0
