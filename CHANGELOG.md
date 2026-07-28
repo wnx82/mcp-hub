@@ -24,6 +24,8 @@ Fixed / Security.
 
 - CI now exercises the systemd installer twice in an isolated staging tree,
   verifying installed files and preservation of local configuration.
+- CI builds and installs the wheel in a clean virtualenv, then checks both
+  console commands and imports from outside the source checkout.
 
 ### Changed
 

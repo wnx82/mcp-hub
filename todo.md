@@ -4,7 +4,7 @@
 
 - [x] Corriger le script `deploy/install.sh` pour embarquer `_version.py` dans l'installation systemd
 - [x] Ajouter un test CI qui valide explicitement le flux `deploy/install.sh` sur une arborescence temporaire
-- [ ] Ajouter un smoke test packaging qui verifie `mcp-hub --version` et l'import du module apres installation
+- [x] Ajouter un smoke test packaging qui verifie `mcp-hub --version` et l'import du module apres installation
 - [ ] Decouper progressivement `server.py` en modules `tools/*` pour reduire le risque de regression dans le monolithe
 - [ ] Uniformiser les docstrings encore en francais vers l'anglais pour garder une interface modele coherente
 - [ ] Ajouter des tests cibles pour les helpers critiques: redaction, garde `READ_ONLY`, chargement de config et inventaire YAML
