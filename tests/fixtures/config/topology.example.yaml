@@ -1,0 +1,9 @@
+hypervisor:
+  hostname: 192.0.2.10
+  role: hypervisor
+  guests:
+    "ct/100":
+      name: services
+      ip: 192.0.2.20
+_do_not_touch:
+  - "ct/101 dns: critical network service"

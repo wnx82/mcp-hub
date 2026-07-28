@@ -1,0 +1,6 @@
+endpoints:
+  - name: dashboard
+    url: https://dashboard.example.com/health
+intermittent:
+  - name: backup
+    url: https://backup.example.com/health

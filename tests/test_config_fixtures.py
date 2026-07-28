@@ -18,9 +18,9 @@ class ConfigurationFixtureTests(unittest.TestCase):
 
     def test_coherent_example_configuration_loads(self) -> None:
         with (
-            mock.patch.object(config, "HOSTS_FILE", FIXTURES / "hosts.yaml"),
-            mock.patch.object(config, "TOPOLOGY_FILE", FIXTURES / "topology.yaml"),
-            mock.patch.object(config, "ENDPOINTS_FILE", FIXTURES / "endpoints.yaml"),
+            mock.patch.object(config, "HOSTS_FILE", FIXTURES / "hosts.example.yaml"),
+            mock.patch.object(config, "TOPOLOGY_FILE", FIXTURES / "topology.example.yaml"),
+            mock.patch.object(config, "ENDPOINTS_FILE", FIXTURES / "endpoints.example.yaml"),
         ):
             hosts = config.load_hosts()
             topology = config.load_topology()

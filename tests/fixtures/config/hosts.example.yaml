@@ -1,0 +1,11 @@
+hosts:
+  hypervisor:
+    hostname: pve.example.com
+    user: root
+    role: hypervisor
+    tags: [proxmox, critical]
+  storage:
+    hostname: nas.example.com
+    user: operator
+    role: storage
+    tags: [nas, backup]
