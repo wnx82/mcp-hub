@@ -58,6 +58,21 @@ Integrations are opt-in. Add an `*_ENABLED` flag in `config.py`, default it to
 `False`, document it in `.env.example`, and have the tools return
 `config.integration_disabled("name")` when it is off.
 
+## Dependency policy
+
+Dependencies have two deliberately different representations:
+
+- `pyproject.toml` defines the supported version range for package installs.
+  Lower bounds must provide every API used by MCP Hub; upper bounds prevent an
+  unreviewed breaking major or minor release.
+- `requirements.txt` pins the exact versions used by the systemd installer and
+  the release smoke tests, giving operators a reproducible deployment.
+
+A dependency update must keep both files compatible. Update the range only
+when support changes, update the pin to the version being tested, then run the
+unit, package, and tool-registration checks. Security fixes may update only the
+pin when the existing range already includes the fixed release.
+
 ## Changelog
 
 Every user-visible change needs an entry under `## [Unreleased]` in

@@ -41,6 +41,8 @@ Fixed / Security.
   preventing missing descriptions or French text from being reintroduced.
 - The README now distinguishes development, direct-source, and recommended
   systemd deployment modes and documents their operational responsibilities.
+- The contribution guide now defines how compatible dependency ranges and
+  reproducible deployment pins must be maintained together.
 
 ## [0.2.0] - 2026-07-28
 
