@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -49,6 +50,16 @@ class DocumentationTests(unittest.TestCase):
             re.findall(r"^\| `([A-Z][A-Z0-9_]+)` \|", reference, re.MULTILINE)
         )
         self.assertEqual(runtime, documented)
+
+    def test_generated_tool_reference_is_current(self) -> None:
+        result = subprocess.run(
+            ["python3", "scripts/generate_tool_reference.py", "--check"],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
 
 if __name__ == "__main__":

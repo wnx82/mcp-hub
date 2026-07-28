@@ -143,6 +143,8 @@ jobs:
           MCP_HUB_HOME: ${{ github.workspace }}
           MCP_READ_ONLY: "true"
         run: python scripts/check_tool_annotations.py
+      - name: Generated tool reference is current
+        run: python scripts/generate_tool_reference.py --check
 
   secrets:
     runs-on: ubuntu-latest

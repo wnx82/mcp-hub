@@ -195,8 +195,6 @@ are in the **[environment variable reference](docs/environment.md)**.
 
 ## Tool reference
 
-<!-- TODO: expand each group into a table with signatures -->
-
 Every tool returns the same top-level envelope:
 
 ```json
@@ -232,6 +230,10 @@ and audit trail as every other call.
 | **LM Studio** | `lmstudio_status` `lmstudio_load` `lmstudio_unload` |
 | **Guided diagnostics** | `diagnose_service` `diagnose_endpoint` `audit_host` `check_backup_chain` |
 | **Jobs & introspection** | `job_run` `job_status` `job_list` `job_logs` `mcp_health` `mcp_stats` `audit_export` `plan_mutation` `confirm_mutation` `rollback_change` |
+
+The **[complete generated tool reference](docs/tool-reference.md)** expands
+every group into a table with each tool's exact signature and model-facing
+description. CI verifies it against the registered functions.
 
 Guided diagnostics always stop after observation. They return evidence,
 assessment, and suggested next steps with `correction_applied: false`;

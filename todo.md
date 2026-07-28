@@ -105,7 +105,7 @@
 - [x] Ajouter une demo GIF ou un asciinema montrant une vraie session de troubleshooting
 - [x] Ecrire un exemple complet de connexion depuis un client MCP comme Claude Desktop ou Claude Code
 - [x] Ajouter une table de reference complete des variables d'environnement
-- [ ] Etendre la section "Tool reference" avec un tableau par groupe et les signatures des outils
+- [x] Etendre la section "Tool reference" avec un tableau par groupe et les signatures des outils
 
 ## Configuration et onboarding
 
