@@ -6,9 +6,11 @@
 
 **One MCP server that gives your AI assistant the keys to your whole homelab.**
 
+[![Release](https://img.shields.io/github/v/release/wnx82/mcp-hub?sort=semver)](https://github.com/wnx82/mcp-hub/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![MCP](https://img.shields.io/badge/MCP-1.28-purple.svg)](https://modelcontextprotocol.io/)
+[![CI](https://github.com/wnx82/mcp-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/wnx82/mcp-hub/actions/workflows/ci.yml)
 
 MCP Hub is a single [Model Context Protocol](https://modelcontextprotocol.io/)
 server that sits on one machine in your network and fans out from there: SSH to
@@ -35,6 +37,7 @@ your assistant at it.
 - [Configuration](#configuration)
 - [Tool reference](#tool-reference)
 - [Security](#security)
+- [Versioning](#versioning)
 - [Contributing](#contributing)
 
 ## Features
@@ -147,6 +150,16 @@ MCP Hub is a remote code execution service by design. Before exposing it:
 
 Full threat model, hardening guide, and vulnerability reporting:
 **[SECURITY.md](SECURITY.md)**.
+
+## Versioning
+
+[SemVer](https://semver.org). Pre-1.0, breaking changes bump the **minor** — so
+read the `Changed` and `Removed` notes before upgrading one.
+`_version.py` is the single source of truth; the running server reports it via
+`mcp-hub --version`, in the MCP handshake, and in `mcp_health`.
+
+Every release is documented in **[CHANGELOG.md](CHANGELOG.md)**, with
+security-relevant changes called out in their own section.
 
 ## Contributing
 

@@ -1,0 +1,91 @@
+# Changelog
+
+All notable changes to this project are documented here.
+
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+Pre-1.0, the **minor** number is where breaking changes land. Read the
+`Changed` and `Removed` sections before upgrading a minor.
+
+Because this project can execute code across your fleet, every entry that
+changes a security default is called out under **Security**. Read those first.
+
+<!--
+Add new entries under [Unreleased] as you go. At release time, rename that
+heading to the version, add a fresh empty [Unreleased], and bump _version.py in
+the same commit. Sections, in order: Added / Changed / Deprecated / Removed /
+Fixed / Security.
+-->
+
+## [Unreleased]
+
+Nothing yet.
+
+## [0.1.0] - 2026-07-28
+
+First public release. Extracted from a private deployment and made
+config-driven so it can run against any fleet.
+
+### Added
+
+- **85 MCP tools** over a single streamable-http endpoint, covering fleet SSH
+  execution, Proxmox, Docker, Synology DSM, Cloudflare tunnels and DNS, n8n,
+  Notion, a Bitwarden/Vaultwarden bridge, LM Studio, Wake-on-LAN, background
+  jobs, and health probes.
+- **`config.py`**, a single place resolving every site-specific value from the
+  environment, `.env`, and YAML inventory. No address, hostname, domain, or
+  credential identifier lives in the tool code.
+- **`hosts.yaml`** fleet inventory with roles and tags; `fleet_exec` targets a
+  tag rather than a hand-maintained list.
+- **`topology.yaml`** (optional): curated overlay for guest mapping,
+  recycled-IP traps, and a hard do-not-touch list — the knowledge a live scan
+  cannot recover.
+- **`endpoints.yaml`** (optional): HTTP health probes for `endpoints_health`,
+  with a separate `intermittent` list for hosts that are often powered down.
+- **Opt-in integrations.** Each is off until its `*_ENABLED` flag is set, and
+  disabled ones return a clear error rather than failing obscurely.
+- **Pluggable secrets provider**: `env` (default) or `vaultwarden` via a
+  `bw serve` daemon. DSM and Notion credentials resolve through either.
+- **Bearer-token authentication** (`MCP_AUTH_TOKEN`), enforced by ASGI
+  middleware with a constant-time comparison.
+- **Multiplexed SSH** with a configurable ControlPath, so fleet-wide commands
+  reuse one connection per host.
+- **Packaging**: `pyproject.toml` with a `mcp-hub` entry point, pinned
+  `requirements.txt`, systemd unit templates, and an idempotent
+  `deploy/install.sh` that provisions a dedicated user, a dedicated SSH key,
+  and generated secrets without ever overwriting existing config.
+- `--version` / `-V` flag, and a `version` field in `mcp_health`.
+- CI: lint, an import-and-register smoke test across Python 3.11–3.13, a
+  read-only enforcement test, and a guard rejecting private network data or a
+  tracked real config file.
+
+### Security
+
+- **`MCP_READ_ONLY` defaults to `true`.** All 37 mutating tools refuse until
+  it is explicitly turned off. Enforcement is centralised by wrapping tool
+  registration, so a tool cannot silently escape the guard — but a *new*
+  mutating tool must be added to `config.MUTATING_TOOLS`, which CI checks.
+- **Binds `127.0.0.1` by default** instead of `0.0.0.0`. Exposing remote shell
+  execution on a network is now a deliberate act.
+- **`SECURITY.md`** states the threat model without softening it: this is
+  remote code execution as a service, and prompt injection is an RCE primitive
+  against it. It also lists what the project explicitly does *not* defend
+  against.
+- The MCP `initialize` handshake now reports the hub's own version. Previously
+  it fell back to the installed `mcp` library version, misinforming clients.
+- Secret redaction is applied to file reads and command output.
+
+### Known limitations
+
+- Docstrings are a mix of French and English; the project began as a private
+  French-language tool.
+- `server.py` is a ~3600-line monolith. Splitting it into `tools/*` modules is
+  planned, in reviewable behaviour-preserving chunks.
+- `ruff format` and the `UP` lint rules are not enforced yet — applying either
+  wholesale would bury every subsequent diff.
+- There is one trust level. Anyone holding the bearer token has full access;
+  there is no per-tool ACL and no multi-user model.
+
+[Unreleased]: https://github.com/wnx82/mcp-hub/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/wnx82/mcp-hub/releases/tag/v0.1.0

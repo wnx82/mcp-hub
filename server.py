@@ -16,6 +16,7 @@ import os
 import re
 import socket
 import sqlite3
+import sys
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 from typing import Any, Literal, Optional
@@ -26,6 +27,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
 import config
+from _version import __version__
 
 # --- Config (see config.py / .env.example) ---
 BASE_DIR = config.HUB_HOME
@@ -392,6 +394,11 @@ def _guarded_tool(*d_args, **d_kwargs):
 
 mcp.tool = _guarded_tool
 
+# FastMCP has no `version` parameter, but the low-level server it wraps does,
+# and that is what clients see as serverInfo.version during `initialize`.
+# Left unset it reports the mcp library's own version, which is misleading.
+mcp._mcp_server.version = __version__
+
 if config.READ_ONLY:
     log.warning(
         "MCP_READ_ONLY=true - %d mutating tools are disabled",
@@ -447,6 +454,7 @@ async def mcp_health() -> dict[str, Any]:
     return {
         "status": "ok",
         "server": "mcp-hub",
+        "version": __version__,
         "hostname": socket.gethostname(),
         "time_utc": datetime.now(timezone.utc).isoformat(),
         "user_id": os.getuid(),
@@ -455,6 +463,7 @@ async def mcp_health() -> dict[str, Any]:
         "hosts_reachable": sum(1 for s in hosts_status.values() if s == "reachable"),
         "hosts_status": hosts_status,
         "cloudflare_api_configured": bool(CF_API_TOKEN),
+        "read_only": config.READ_ONLY,
     }
 
 
@@ -3593,6 +3602,11 @@ class _BearerAuthMiddleware:
 
 
 def main() -> None:
+    if "--version" in sys.argv or "-V" in sys.argv:
+        print("mcp-hub %s" % __version__)
+        return
+
+    log.info("mcp-hub %s starting", __version__)
     if not config.AUTH_TOKEN:
         log.warning(
             "MCP_AUTH_TOKEN is empty - the endpoint is protected only by the "

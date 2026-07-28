@@ -4,7 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-hub"
-version = "0.1.0"
+# Single source of truth: _version.py. Never hard-code the version here.
+dynamic = ["version"]
 description = "One MCP server that gives your AI assistant the keys to your whole homelab"
 readme = "README.md"
 license = { text = "MIT" }
@@ -40,7 +41,10 @@ Security = "https://github.com/wnx82/mcp-hub/blob/main/SECURITY.md"
 mcp-hub = "server:main"
 
 [tool.setuptools]
-py-modules = ["server", "config"]
+py-modules = ["server", "config", "_version"]
+
+[tool.setuptools.dynamic]
+version = { attr = "_version.__version__" }
 
 [tool.ruff]
 line-length = 110

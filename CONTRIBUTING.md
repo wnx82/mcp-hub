@@ -58,6 +58,43 @@ Integrations are opt-in. Add an `*_ENABLED` flag in `config.py`, default it to
 `False`, document it in `.env.example`, and have the tools return
 `config.integration_disabled("name")` when it is off.
 
+## Changelog
+
+Every user-visible change needs an entry under `## [Unreleased]` in
+[CHANGELOG.md](CHANGELOG.md), in the right section (Added / Changed /
+Deprecated / Removed / Fixed / Security). Internal refactors that change
+nothing for an operator do not.
+
+If your change alters a **security default** — a bind address, an auth
+requirement, what `MCP_READ_ONLY` covers — it goes under `Security`, whether
+it tightens or loosens things.
+
+## Releasing
+
+Versioning is [SemVer](https://semver.org). Pre-1.0, breaking changes bump the
+**minor**. `_version.py` is the single source of truth: `pyproject.toml` reads
+it, the server reports it in the MCP handshake and in `mcp_health`, and CI
+refuses a mismatch.
+
+1. Move the `[Unreleased]` entries into a new `## [x.y.z] - YYYY-MM-DD`
+   section, and leave a fresh empty `[Unreleased]` above it.
+2. Update the two link definitions at the bottom of the changelog.
+3. Bump `__version__` in `_version.py` **in the same commit**.
+4. Check it locally — this is exactly what CI runs:
+   ```bash
+   python scripts/check_version.py vx.y.z
+   ```
+5. Tag and push:
+   ```bash
+   git tag -a vx.y.z -m "vx.y.z" && git push origin main --tags
+   ```
+
+Pushing the tag triggers `.github/workflows/release.yml`, which re-checks that
+the tag, `_version.py`, and the changelog all agree, builds the sdist and
+wheel, and creates the GitHub release using that version's changelog section as
+the notes. A tag whose version has no changelog entry fails before anything is
+published.
+
 ## Known debt
 
 - Docstrings are a mix of French and English (the project started as a private

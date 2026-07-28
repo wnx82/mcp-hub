@@ -18,6 +18,8 @@ jobs:
           python-version: "3.12"
       - run: pip install ruff
       - run: ruff check --output-format=github .
+      - name: Version and CHANGELOG agree
+        run: python scripts/check_version.py
 
   smoke:
     runs-on: ubuntu-latest

@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Refuse to publish a tag that disagrees with _version.py, or a version
+      # the changelog never mentioned. Runs before anything is created.
+      - name: Tag, version and CHANGELOG must agree
+        run: python scripts/check_version.py "${GITHUB_REF_NAME}"
+
+      - name: Build sdist and wheel
+        run: |
+          pip install build
+          python -m build
+          ls -l dist/
+
+      - name: Extract this version's CHANGELOG section
+        id: notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # Everything between this version's heading and the next '## '
+          # heading, stopping early at the trailing link-reference block so the
+          # last section in the file does not swallow it.
+          awk -v v="$version" '
+            $0 ~ "^## \\[" v "\\]"   { grab = 1; next }
+            grab && /^## /           { exit }
+            grab && /^\[[^]]+\]: /   { exit }
+            grab                     { print }
+          ' CHANGELOG.md | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::error::no CHANGELOG section found for $version"; exit 1
+          fi
+          echo "--- release notes ---"; cat release-notes.md
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          case "${GITHUB_REF_NAME}" in
+            *-*)      prerelease="--prerelease" ;;   # v0.2.0-rc1
+            v0.*)     prerelease="" ;;               # pre-1.0 stable is still a release
+          esac
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file release-notes.md \
+            $prerelease \
+            dist/*
