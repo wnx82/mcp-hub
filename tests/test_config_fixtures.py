@@ -8,6 +8,7 @@ from unittest import mock
 YAML_AVAILABLE = importlib.util.find_spec("yaml") is not None
 FIXTURES = Path(__file__).parent / "fixtures" / "config"
 ROOT = Path(__file__).resolve().parents[1]
+EXAMPLES = ROOT / "docs" / "examples"
 
 
 @unittest.skipUnless(YAML_AVAILABLE, "PyYAML is not installed")
@@ -48,6 +49,17 @@ class ConfigurationFixtureTests(unittest.TestCase):
         self.assertTrue(topology["_do_not_touch"])
         self.assertTrue(endpoints)
         self.assertTrue(intermittent)
+
+    def test_minimal_host_inventory_is_ready_to_customize(self) -> None:
+        with mock.patch.object(
+            config, "HOSTS_FILE", EXAMPLES / "hosts.minimal.yaml"
+        ):
+            hosts = config.load_hosts()
+
+        self.assertEqual({"prox", "nas"}, set(hosts))
+        self.assertEqual("hypervisor", hosts["prox"]["role"])
+        self.assertIn("backup", hosts["nas"]["tags"])
+        self.assertTrue(hosts["nas"]["hostname"].endswith(".example.lan"))
 
 
 if __name__ == "__main__":

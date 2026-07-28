@@ -1,0 +1,16 @@
+# Minimal inventory for a small but realistic homelab.
+# Copy this file to hosts.yaml, then replace the example hostnames and users.
+hosts:
+  prox:
+    hostname: prox.example.lan
+    user: mcphub
+    port: 22
+    role: hypervisor
+    tags: [proxmox, critical]
+
+  nas:
+    hostname: nas.example.lan
+    user: mcphub
+    role: storage
+    tags: [storage, backup]
+    mac: "aa:bb:cc:dd:ee:01"

@@ -189,6 +189,10 @@ hosts:
 ```
 
 Tags are how you address groups: `fleet_exec(tag="backup", command="df -h")`.
+For a copy-ready two-host inventory, start with
+[`docs/examples/hosts.minimal.yaml`](docs/examples/hosts.minimal.yaml). The
+larger [`hosts.example.yaml`](hosts.example.yaml) demonstrates every supported
+host option.
 
 The complete defaults, limits, integration settings, and secret-handling notes
 are in the **[environment variable reference](docs/environment.md)**.
