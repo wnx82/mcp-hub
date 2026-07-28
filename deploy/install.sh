@@ -51,6 +51,10 @@ chmod 0750 "$PREFIX/server.py" "$PREFIX/wake-host.py"
 install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0750 "$PREFIX/deploy"
 install -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0750 \
   "$SRC/deploy/bw-serve-start.sh" "$PREFIX/deploy/bw-serve-start.sh"
+install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0750 "$PREFIX/tools"
+for f in "$SRC"/tools/*.py; do
+  install -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0640 "$f" "$PREFIX/tools/$(basename "$f")"
+done
 
 # Rescue is deliberately outside PREFIX and uses the system Python. A broken
 # hub virtualenv or import must not make its diagnostics unavailable.

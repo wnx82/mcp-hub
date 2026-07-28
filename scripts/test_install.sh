@@ -34,6 +34,7 @@ run_installer
 sudo test -f "$prefix/server.py"
 sudo test -f "$prefix/config.py"
 sudo test -f "$prefix/_version.py"
+sudo test -f "$prefix/tools/inventory.py"
 sudo test -f "$rescue_prefix/rescue/cli.py"
 sudo test -x "$rescue_bin"
 sudo test -f "$env_file"

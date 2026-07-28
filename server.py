@@ -28,6 +28,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 import config
 from _version import __version__
+from tools.inventory import list_hosts as list_hosts_tool
 
 # --- Config (see config.py / .env.example) ---
 BASE_DIR = config.HUB_HOME
@@ -467,24 +468,7 @@ async def mcp_health() -> dict[str, Any]:
     }
 
 
-@mcp.tool()
-def list_hosts() -> dict[str, Any]:
-    """Liste les hosts configures avec roles et tags."""
-    hosts = _load_hosts()
-    return {
-        "count": len(hosts),
-        "hosts": {
-            name: {
-                "hostname": info["hostname"],
-                "user": info["user"],
-                "port": info.get("port", 22),
-                "role": info.get("role", "unknown"),
-                "tags": info.get("tags", []),
-                "mac": info.get("mac"),
-            }
-            for name, info in hosts.items()
-        },
-    }
+list_hosts = mcp.tool()(list_hosts_tool)
 
 
 # === TOOLS - Shell exec ===

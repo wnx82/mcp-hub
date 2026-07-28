@@ -31,6 +31,8 @@ Fixed / Security.
 
 - Installer destinations and external setup steps can be overridden for safe
   staging tests while production defaults remain unchanged.
+- Tool modularisation has started with `list_hosts` moved to
+  `tools/inventory.py` while preserving its public MCP name and schema.
 
 ## [0.2.0] - 2026-07-28
 
