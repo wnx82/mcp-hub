@@ -28,7 +28,19 @@ your assistant at it.
 > genuinely dangerous. Defaults are safe (`127.0.0.1`, read-only); the danger
 > starts when you change them.
 
-<!-- TODO: demo GIF — asciinema of a real troubleshooting session -->
+## Troubleshooting demo
+
+The repository includes a sanitized Asciinema recording of a complete,
+observation-first troubleshooting session: failed endpoint, systemd diagnosis,
+exact mutation plan, explicit confirmation, restart, and final health checks.
+It uses the example inventory and contains no private infrastructure data.
+
+```bash
+asciinema play docs/troubleshooting.cast
+```
+
+See [the recording](docs/troubleshooting.cast) directly when Asciinema is not
+installed; the cast format is newline-delimited JSON and remains reviewable.
 
 ## Contents
 

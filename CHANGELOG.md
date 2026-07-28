@@ -22,6 +22,8 @@ Fixed / Security.
 
 ### Added
 
+- A sanitized Asciinema recording demonstrates a complete observation,
+  confirmation, correction, and verification troubleshooting session.
 - CI now exercises the systemd installer twice in an isolated staging tree,
   verifying installed files and preservation of local configuration.
 - CI builds and installs the wheel in a clean virtualenv, then checks both
