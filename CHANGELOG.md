@@ -48,6 +48,11 @@ Fixed / Security.
 - The contribution guide now defines how compatible dependency ranges and
   reproducible deployment pins must be maintained together.
 
+### Fixed
+
+- Tool documentation checks now resolve the repository root when executed as
+  scripts, matching their GitHub Actions invocation.
+
 ### Security
 
 - Optional bearer-token access profiles now provide `read`, `operate`, and
