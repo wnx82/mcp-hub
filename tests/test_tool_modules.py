@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import importlib.util
 import unittest
 from pathlib import Path
 
 import tools.cloudflare
 import tools.common
 import tools.dsm
-import tools.inventory
 import tools.playbooks
 import tools.ssh
 from tools.registry import domain_for_tool, registered_domains
+
+YAML_AVAILABLE = importlib.util.find_spec("yaml") is not None
+
+if YAML_AVAILABLE:
+    import tools.inventory
 
 
 class DomainModuleTests(unittest.TestCase):
@@ -20,7 +25,8 @@ class DomainModuleTests(unittest.TestCase):
         self.assertEqual("cloudflare", domain_for_tool("cloudflare_dns_list"))
         self.assertEqual("cloudflare", domain_for_tool("list_cloudflare_tunnels"))
         self.assertEqual("dsm", domain_for_tool("dsm_health"))
-        self.assertEqual("inventory", domain_for_tool("get_topology"))
+        if YAML_AVAILABLE:
+            self.assertEqual("inventory", domain_for_tool("get_topology"))
         self.assertEqual("playbooks", domain_for_tool("audit_host"))
         self.assertEqual("core", domain_for_tool("not_yet_extracted"))
         self.assertGreaterEqual(len(registered_domains()), 4)
@@ -58,6 +64,7 @@ class DomainModuleTests(unittest.TestCase):
         self.assertEqual("[1, 2]", encoded["items"])
         self.assertEqual('"url"', encoded["type"])
 
+    @unittest.skipUnless(YAML_AVAILABLE, "PyYAML is not installed")
     def test_inventory_helpers_expose_configured_hosts(self) -> None:
         hosts = tools.inventory.load_hosts()
         self.assertIsInstance(hosts, dict)
