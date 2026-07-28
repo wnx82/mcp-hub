@@ -36,6 +36,24 @@ import config
 from _version import __version__
 from core.limits import LimitLease, ResourceLimiter
 from core.snapshots import SnapshotStore
+from tools.cloudflare import (
+    dns_records_path,
+    extract_tunnel_config,
+    tunnel_config_path,
+    tunnel_path,
+)
+from tools.dsm import (
+    AUTH_ERROR_CODES as _DSM_AUTH_ERROR_CODES,
+)
+from tools.dsm import (
+    ERROR_MESSAGES as _DSM_ERROR_MESSAGES,
+)
+from tools.dsm import (
+    encode_params as _dsm_encode_params,
+)
+from tools.dsm import (
+    endpoint as dsm_endpoint,
+)
 from tools.inventory import list_hosts as list_hosts_tool
 from tools.playbooks import (
     backup_chain_command,
@@ -43,6 +61,8 @@ from tools.playbooks import (
     parse_sections,
     service_diagnostic_command,
 )
+from tools.registry import domain_for_tool
+from tools.ssh import ssh_argv, wrap_remote_command
 
 # --- Config (see config.py / .env.example) ---
 BASE_DIR = config.HUB_HOME
@@ -272,45 +292,18 @@ async def _local_run(command: str, as_root: bool = False, timeout: int = DEFAULT
 
 
 # --- Execution SSH distante (multiplex) ---
-def _wrap_remote(host_info: dict, command: str, as_root: bool) -> str:
-    """Enveloppe la commande selon le shell du host cible pour rendre
-    l execution independante du shell de login distant (zsh/fish/busybox).
-    powershell => transmise telle quelle ; sh/busybox => sh -c ; bash (defaut) => bash -c.
-    """
-    import shlex
-    shell = (host_info.get("shell") or "bash").lower()
-    if shell in ("powershell", "pwsh", "windows"):
-        return command
-    interp = "sh" if shell in ("sh", "ash", "dash", "busybox") else "bash"
-    inner = interp + " -c " + shlex.quote(command)
-    if as_root and host_info.get("user") != "root":
-        return "sudo -n " + inner
-    return inner
-
-
-def _ssh_argv(host_info: dict, remote_cmd: str) -> list[str]:
-    return [
-        "ssh",
-        "-o", "BatchMode=yes",
-        "-o", "StrictHostKeyChecking=accept-new",
-        "-o", "ConnectTimeout=10",
-        "-o", "ControlMaster=auto",
-        "-o", "ControlPath=" + config.SSH_CONTROL_PATH,
-        "-o", "ControlPersist=60m",
-        "-p", str(host_info.get("port", 22)),
-        "-i", str(SSH_KEY),
-        f"{host_info['user']}@{host_info['hostname']}",
-        remote_cmd,
-    ]
-
-
 async def _ssh_run(host: str, command: str, as_root: bool = False, timeout: int = DEFAULT_TIMEOUT) -> dict:
     started = datetime.now()
     host_info = _get_host(host)
 
-    remote_cmd = _wrap_remote(host_info, command, as_root)
+    remote_cmd = wrap_remote_command(host_info, command, as_root)
 
-    argv = _ssh_argv(host_info, remote_cmd)
+    argv = ssh_argv(
+        host_info,
+        remote_cmd,
+        ssh_key=SSH_KEY,
+        control_path=config.SSH_CONTROL_PATH,
+    )
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -552,6 +545,7 @@ def _log_tool_audit(envelope: dict[str, Any]) -> None:
     summary = {
         "ok": envelope["ok"],
         "error": envelope["error"],
+        "domain": domain_for_tool(envelope["tool"]),
         "data_type": type(data).__name__,
         "data_keys": sorted(data) if isinstance(data, dict) else [],
     }
@@ -887,19 +881,28 @@ async def docker_exec(container: str, command: str, host: str = DEFAULT_HOST, ct
 @mcp.tool()
 async def cloudflare_tunnels_list() -> dict[str, Any]:
     """List active Cloudflare tunnels for the configured account."""
-    return await _with_tool("cloudflare_tunnels_list", _cf_api("GET", f"/accounts/{CF_ACCOUNT_ID}/cfd_tunnel?is_deleted=false"))
+    return await _with_tool(
+        "cloudflare_tunnels_list",
+        _cf_api("GET", f"{tunnel_path(CF_ACCOUNT_ID)}?is_deleted=false"),
+    )
 
 
 @mcp.tool()
 async def cloudflare_tunnel_get(tunnel_id: str) -> dict[str, Any]:
     """Return details for a Cloudflare tunnel by ID."""
-    return await _with_tool("cloudflare_tunnel_get", _cf_api("GET", f"/accounts/{CF_ACCOUNT_ID}/cfd_tunnel/{tunnel_id}"))
+    return await _with_tool(
+        "cloudflare_tunnel_get",
+        _cf_api("GET", tunnel_path(CF_ACCOUNT_ID, tunnel_id)),
+    )
 
 
 @mcp.tool()
 async def cloudflare_tunnel_config_get(tunnel_id: str) -> dict[str, Any]:
     """Return the ingress configuration of a Cloudflare tunnel."""
-    return await _with_tool("cloudflare_tunnel_config_get", _cf_api("GET", f"/accounts/{CF_ACCOUNT_ID}/cfd_tunnel/{tunnel_id}/configurations"))
+    return await _with_tool(
+        "cloudflare_tunnel_config_get",
+        _cf_api("GET", tunnel_config_path(CF_ACCOUNT_ID, tunnel_id)),
+    )
 
 
 @mcp.tool()
@@ -907,14 +910,12 @@ async def cloudflare_tunnel_config_update(tunnel_id: str, ingress: list[dict]) -
     """Replace tunnel ingress rules after capturing a reversible snapshot."""
     current = await _cf_api(
         "GET",
-        f"/accounts/{CF_ACCOUNT_ID}/cfd_tunnel/{tunnel_id}/configurations",
+        tunnel_config_path(CF_ACCOUNT_ID, tunnel_id),
     )
     if not current.get("success"):
         return {"error": "cannot snapshot current Cloudflare configuration", "detail": current}
-    current_config = (
-        ((current.get("data") or {}).get("result") or {}).get("config")
-    )
-    if not isinstance(current_config, dict):
+    current_config = extract_tunnel_config(current)
+    if current_config is None:
         return {"error": "Cloudflare returned no snapshot-compatible configuration"}
     change_id = _snapshot_store.create(
         profile=_profile_identity(_current_profile.get()),
@@ -926,7 +927,7 @@ async def cloudflare_tunnel_config_update(tunnel_id: str, ingress: list[dict]) -
         "cloudflare_tunnel_config_update",
         _cf_api(
             "PUT",
-            f"/accounts/{CF_ACCOUNT_ID}/cfd_tunnel/{tunnel_id}/configurations",
+            tunnel_config_path(CF_ACCOUNT_ID, tunnel_id),
             json_body={"config": {"ingress": ingress}},
         ),
     )
@@ -941,7 +942,7 @@ async def cloudflare_tunnel_config_update(tunnel_id: str, ingress: list[dict]) -
 async def cloudflare_dns_list(zone_id: Optional[str] = None, name_filter: Optional[str] = None) -> dict[str, Any]:
     """List DNS records in the configured Cloudflare zone."""
     zid = zone_id or CF_ZONE_ID
-    path = f"/zones/{zid}/dns_records?per_page=200"
+    path = f"{dns_records_path(zid)}?per_page=200"
     if name_filter:
         path += f"&name.contains={name_filter}"
     return await _with_tool("cloudflare_dns_list", _cf_api("GET", path))
@@ -955,7 +956,7 @@ async def cloudflare_dns_create(name: str, type: str, content: str, proxied: boo
         "cloudflare_dns_create",
         _cf_api(
             "POST",
-            f"/zones/{zid}/dns_records",
+            dns_records_path(zid),
             json_body={"name": name, "type": type, "content": content, "proxied": proxied, "ttl": ttl},
         ),
     )
@@ -965,7 +966,10 @@ async def cloudflare_dns_create(name: str, type: str, content: str, proxied: boo
 async def cloudflare_dns_delete(record_id: str, zone_id: Optional[str] = None) -> dict[str, Any]:
     """Delete a Cloudflare DNS record by ID."""
     zid = zone_id or CF_ZONE_ID
-    return await _with_tool("cloudflare_dns_delete", _cf_api("DELETE", f"/zones/{zid}/dns_records/{record_id}"))
+    return await _with_tool(
+        "cloudflare_dns_delete",
+        _cf_api("DELETE", dns_records_path(zid, record_id)),
+    )
 
 
 @mcp.tool()
@@ -2138,30 +2142,6 @@ DSM_SSH_HOST = os.environ.get("DSM_SSH_HOST", "dsm")
 _DSM_SID_TTL_SECONDS = 900.0
 _dsm_sid_cache: dict[str, Any] = {"sid": None, "fetched_at": 0.0}
 
-_DSM_AUTH_ERROR_CODES = {105, 106, 107, 119}
-_DSM_ERROR_MESSAGES = {
-    100: "erreur inconnue",
-    101: "parametre invalide ou manquant",
-    102: "API inexistante",
-    103: "methode inexistante pour cette API",
-    104: "version d'API non supportee",
-    105: "permissions insuffisantes pour ce compte",
-    106: "session expiree",
-    107: "session invalidee (login depuis une autre IP)",
-    119: "SID invalide ou expire",
-    120: "parametre requis manquant",
-    400: "identifiants invalides (ou parametre invalide selon l'API appelee)",
-    401: "compte desactive",
-    402: "compte bloque",
-    403: "code 2FA requis",
-    404: "code 2FA incorrect",
-    406: "activation OTP requise",
-    407: "IP bloquee par l'auto-block DSM",
-    408: "chemin ou fichier introuvable",
-    409: "operation non autorisee sur ce chemin",
-    414: "tache introuvable",
-}
-
 # Codes de statut DownloadStation2 (best-effort, non documentes officiellement)
 _DSM_DL_STATUS = {
     1: "waiting", 2: "downloading", 3: "paused", 4: "finishing", 5: "finished",
@@ -2172,32 +2152,7 @@ _DSM_DL_STATUS = {
 
 def _dsm_endpoint() -> tuple[str, int]:
     """(host, port) de l'API DSM, pour le pre-check TCP."""
-    from urllib.parse import urlparse
-
-    parsed = urlparse(DSM_WEBAPI_BASE)
-    default_port = 443 if parsed.scheme == "https" else 80
-    return parsed.hostname or "localhost", parsed.port or default_port
-
-
-def _dsm_encode_params(params: Optional[dict], json_style: bool) -> dict[str, str]:
-    """Serialise les params pour l'API DSM.
-
-    json_style=True : les API DownloadStation2 v2 exigent des valeurs JSON
-    (les chaines doivent etre entre guillemets, ex: type="url" -> '"url"').
-    """
-    out: dict[str, str] = {}
-    for key, value in (params or {}).items():
-        if value is None:
-            continue
-        if isinstance(value, bool):
-            out[key] = "true" if value else "false"
-        elif isinstance(value, (list, dict)):
-            out[key] = json.dumps(value, ensure_ascii=False)
-        elif json_style and isinstance(value, str):
-            out[key] = json.dumps(value, ensure_ascii=False)
-        else:
-            out[key] = str(value)
-    return out
+    return dsm_endpoint(DSM_WEBAPI_BASE)
 
 
 async def _dsm_get_credentials() -> tuple[str, str]:
@@ -3456,7 +3411,7 @@ async def cf_ingress_dump(
         return {"error": "no tunnel_id given and CLOUDFLARE_DEFAULT_TUNNEL_ID is unset"}
     r = await _cf_api(
         "GET",
-        "/accounts/%s/cfd_tunnel/%s/configurations" % (CF_ACCOUNT_ID, tunnel_id),
+        tunnel_config_path(CF_ACCOUNT_ID, tunnel_id),
     )
     if not r.get("success", False):
         return {"error": "echec API Cloudflare", "detail": r}
@@ -3821,7 +3776,7 @@ async def _apply_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     if tool == "cloudflare_tunnel_config_update":
         return await _cf_api(
             "PUT",
-            f"/accounts/{CF_ACCOUNT_ID}/cfd_tunnel/{state['tunnel_id']}/configurations",
+            tunnel_config_path(CF_ACCOUNT_ID, state["tunnel_id"]),
             json_body={"config": state["config"]},
         )
     if tool in {"notion_update_page", "notion_archive_page"}:

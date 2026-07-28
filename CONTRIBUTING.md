@@ -42,9 +42,10 @@ print(len(asyncio.run(server.mcp.list_tools())), 'tools registered')
 
 ## Adding a tool
 
-1. Write it in `server.py` with an `@mcp.tool()` decorator and a docstring —
-   the docstring *is* the model-facing documentation, so say what the tool
-   does, what its arguments mean, and what it will refuse to do.
+1. Put protocol logic and pure helpers in the matching `tools/<domain>.py`
+   module, register ownership through `tools/registry.py`, and keep only the
+   FastMCP adapter in `server.py`. The tool docstring is the model-facing
+   documentation, so say what it does and what it will refuse to do.
 2. **If it mutates anything, add its name to `config.MUTATING_TOOLS`.** This is
    what `MCP_READ_ONLY` keys off. A mutating tool missing from that set is a
    security bug, not a style issue.
@@ -115,9 +116,9 @@ published.
 - Docstrings are a mix of French and English (the project started as a private
   French-language tool). New docstrings should be in English; translating the
   rest is welcome and easy to review in small batches.
-- `server.py` is a ~3500-line monolith. Splitting it into `tools/*` modules is
-  planned but not urgent — behaviour-preserving, reviewable chunks preferred
-  over one large move.
+- `server.py` is still the composition root. Continue moving coherent protocol
+  logic into `tools/*` in reviewable, behaviour-preserving chunks; domain
+  modules must not import `server.py`.
 
 ## Conduct
 

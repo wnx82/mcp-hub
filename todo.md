@@ -27,7 +27,7 @@
 - [x] Ajouter des protections contre les boucles et l'epuisement des ressources: limites de concurrence par host, quotas par token, tailles maximales, circuit breaker et temporisation entre operations mutatrices
 - [x] Capturer l'etat avant les mutations Cloudflare, Notion, de configuration ou de fichier, puis proposer un tool `rollback_change`
 - [x] Ajouter des playbooks guides comme `diagnose_service`, `diagnose_endpoint`, `audit_host` et `check_backup_chain`, avec une phase d'observation avant toute correction
-- [ ] Deplacer progressivement chaque domaine dans des modules comme `tools/ssh.py`, `tools/cloudflare.py` et `tools/dsm.py`, relies par un registre commun
+- [x] Deplacer progressivement chaque domaine dans des modules comme `tools/ssh.py`, `tools/cloudflare.py` et `tools/dsm.py`, relies par un registre commun
 - [ ] Une fois le socle consolide, evaluer les integrations Prometheus/Grafana, Home Assistant, Kubernetes, ntfy/Apprise et Restic/Borg
 
 ## Automatisation Claude

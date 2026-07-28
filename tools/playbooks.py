@@ -5,6 +5,13 @@ import re
 import shlex
 from typing import Iterable
 
+from tools.registry import register_domain
+
+register_domain(
+    "playbooks",
+    {"audit_host", "check_backup_chain", "diagnose_endpoint", "diagnose_service"},
+)
+
 _SERVICE_NAME = re.compile(r"^[A-Za-z0-9_.@:-]{1,200}$")
 
 

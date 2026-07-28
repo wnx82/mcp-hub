@@ -53,6 +53,9 @@ Fixed / Security.
   staging tests while production defaults remain unchanged.
 - Tool modularisation has started with `list_hosts` moved to
   `tools/inventory.py` while preserving its public MCP name and schema.
+- SSH construction, Cloudflare protocol helpers, DSM metadata, and playbook
+  builders now live in domain modules connected by `tools/registry.py`; audit
+  summaries include the resolved domain.
 - All model-facing tool descriptions are now in English, with a CI guard
   preventing missing descriptions or French text from being reintroduced.
 - The README now distinguishes development, direct-source, and recommended

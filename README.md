@@ -118,6 +118,15 @@ network access, an SSH identity, persistent `state.db`, and access to its local
 inventory; operators packaging it in a container must preserve those
 properties themselves.
 
+## Architecture
+
+`server.py` remains the FastMCP composition root while domain code is moving
+incrementally into `tools/`. SSH command construction, Cloudflare paths and
+response extraction, DSM protocol metadata, inventory, and playbook builders
+are already isolated. `tools/registry.py` assigns extracted tools to a domain;
+that domain is included in each audit summary. New protocol logic should live
+in its domain module and must not import `server.py`.
+
 ## Rescue diagnostics
 
 `mcp-hub-rescue` is a read-only local CLI designed to keep working when the

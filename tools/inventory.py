@@ -5,6 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 import config
+from tools.registry import register_domain
+
+register_domain("inventory", {"list_hosts", "topology"})
 
 
 def list_hosts() -> dict[str, Any]:
