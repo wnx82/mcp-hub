@@ -11,7 +11,13 @@ PREFIX="${PREFIX:-/opt/mcp-hub}"
 RESCUE_PREFIX="${RESCUE_PREFIX:-/opt/mcp-hub-rescue}"
 SERVICE_USER="${SERVICE_USER:-mcphub}"
 ENV_FILE="${ENV_FILE:-/etc/default/mcp-hub}"
-UNIT_FILE="/etc/systemd/system/mcp-hub.service"
+UNIT_FILE="${UNIT_FILE:-/etc/systemd/system/mcp-hub.service}"
+RESCUE_BIN="${RESCUE_BIN:-/usr/local/bin/mcp-hub-rescue}"
+SSH_KEY="${SSH_KEY:-/home/$SERVICE_USER/.ssh/id_ed25519}"
+SYSTEMCTL="${SYSTEMCTL:-systemctl}"
+INSTALL_DEPENDENCIES="${INSTALL_DEPENDENCIES:-true}"
+INSTALL_SSH_KEY="${INSTALL_SSH_KEY:-true}"
+RELOAD_SYSTEMD="${RELOAD_SYSTEMD:-true}"
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -20,7 +26,7 @@ warn() { printf '\033[1;33m!!!\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31mxxx\033[0m %s\n' "$*" >&2; exit 1; }
 
 [[ $EUID -eq 0 ]] || die "run as root (sudo $0)"
-command -v systemctl >/dev/null || die "systemd is required"
+command -v "$SYSTEMCTL" >/dev/null || die "systemd is required"
 command -v python3   >/dev/null || die "python3 is required"
 
 python3 - <<'PY' || die "Python 3.11+ is required"
@@ -54,8 +60,8 @@ for f in "$SRC"/rescue/*.py; do
   install -o root -g root -m 0644 "$f" "$RESCUE_PREFIX/rescue/$(basename "$f")"
 done
 sed "s|/opt/mcp-hub-rescue|$RESCUE_PREFIX|g" \
-  "$SRC/deploy/mcp-hub-rescue" > /usr/local/bin/mcp-hub-rescue
-chmod 0755 /usr/local/bin/mcp-hub-rescue
+  "$SRC/deploy/mcp-hub-rescue" > "$RESCUE_BIN"
+chmod 0755 "$RESCUE_BIN"
 
 # --- config templates (never overwrite) ---------------------------------------
 for pair in "hosts.example.yaml:hosts.yaml" \
@@ -71,15 +77,19 @@ for pair in "hosts.example.yaml:hosts.yaml" \
   install -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0640 "$SRC/$src" "$PREFIX/$src"
 done
 
-# --- virtualenv ---------------------------------------------------------------
-if [[ -x "$PREFIX/.venv/bin/python" ]]; then
-  log "virtualenv already present, updating dependencies"
+# --- virtualenv --------------------------------------------------------------
+if [[ "$INSTALL_DEPENDENCIES" == "true" ]]; then
+  if [[ -x "$PREFIX/.venv/bin/python" ]]; then
+    log "virtualenv already present, updating dependencies"
+  else
+    log "creating virtualenv"
+    sudo -u "$SERVICE_USER" python3 -m venv "$PREFIX/.venv"
+  fi
+  sudo -u "$SERVICE_USER" "$PREFIX/.venv/bin/pip" install --quiet --upgrade pip
+  sudo -u "$SERVICE_USER" "$PREFIX/.venv/bin/pip" install --quiet -r "$PREFIX/requirements.txt"
 else
-  log "creating virtualenv"
-  sudo -u "$SERVICE_USER" python3 -m venv "$PREFIX/.venv"
+  log "dependency installation skipped"
 fi
-sudo -u "$SERVICE_USER" "$PREFIX/.venv/bin/pip" install --quiet --upgrade pip
-sudo -u "$SERVICE_USER" "$PREFIX/.venv/bin/pip" install --quiet -r "$PREFIX/requirements.txt"
 
 # --- environment file ----------------------------------------------------------
 if [[ -e "$ENV_FILE" ]]; then
@@ -105,16 +115,19 @@ EOF
   warn "Both are stored in $ENV_FILE (root, 0600). Save them in your password manager."
 fi
 
-# --- ssh key --------------------------------------------------------------------
-SSH_KEY="/home/$SERVICE_USER/.ssh/id_ed25519"
-if [[ -f "$SSH_KEY" ]]; then
-  log "ssh key already present"
+# --- ssh key -----------------------------------------------------------------
+if [[ "$INSTALL_SSH_KEY" == "true" ]]; then
+  if [[ -f "$SSH_KEY" ]]; then
+    log "ssh key already present"
+  else
+    log "generating a dedicated ssh key for $SERVICE_USER"
+    install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0700 "$(dirname "$SSH_KEY")"
+    sudo -u "$SERVICE_USER" ssh-keygen -t ed25519 -N "" -C "mcp-hub@$(hostname)" -f "$SSH_KEY" >/dev/null
+    warn "authorise this key on your fleet:"
+    cat "$SSH_KEY.pub"
+  fi
 else
-  log "generating a dedicated ssh key for $SERVICE_USER"
-  install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0700 "/home/$SERVICE_USER/.ssh"
-  sudo -u "$SERVICE_USER" ssh-keygen -t ed25519 -N "" -C "mcp-hub@$(hostname)" -f "$SSH_KEY" >/dev/null
-  warn "authorise this key on your fleet:"
-  cat "$SSH_KEY.pub"
+  log "SSH key generation skipped"
 fi
 
 # --- systemd unit ------------------------------------------------------------------
@@ -128,7 +141,11 @@ else
   chmod 0644 "$UNIT_FILE"
 fi
 
-systemctl daemon-reload
+if [[ "$RELOAD_SYSTEMD" == "true" ]]; then
+  "$SYSTEMCTL" daemon-reload
+else
+  log "systemd reload skipped"
+fi
 log "done."
 echo
 echo "Next:"

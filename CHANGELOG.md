@@ -20,7 +20,15 @@ Fixed / Security.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- CI now exercises the systemd installer twice in an isolated staging tree,
+  verifying installed files and preservation of local configuration.
+
+### Changed
+
+- Installer destinations and external setup steps can be overridden for safe
+  staging tests while production defaults remain unchanged.
 
 ## [0.2.0] - 2026-07-28
 
