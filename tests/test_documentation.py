@@ -22,6 +22,13 @@ class DocumentationTests(unittest.TestCase):
         self.assertIn("plan_mutation", transcript)
         self.assertIn("confirm_mutation", transcript)
 
+    def test_claude_guide_never_embeds_a_token(self) -> None:
+        guide = (ROOT / "docs" / "claude-clients.md").read_text(encoding="utf-8")
+        self.assertIn("${MCP_HUB_TOKEN}", guide)
+        self.assertIn("--transport http", guide)
+        self.assertIn("MCP_READ_ONLY=true", guide)
+        self.assertNotIn("Bearer changeme", guide)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -107,7 +107,9 @@ For a systemd deployment, `sudo ./deploy/install.sh` creates a dedicated
 and installs the unit. It is idempotent and never overwrites existing config.
 See [deploy/](deploy/).
 
-<!-- TODO: worked example — connecting from Claude Desktop / Claude Code -->
+For a complete Claude Code setup, safe token handling, connection checks, a
+first read-only prompt, and the current Claude Desktop limitation, see
+**[Connect MCP Hub to Claude](docs/claude-clients.md)**.
 
 ## Deployment
 
