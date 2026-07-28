@@ -26,6 +26,8 @@ Fixed / Security.
   verifying installed files and preservation of local configuration.
 - CI builds and installs the wheel in a clean virtualenv, then checks both
   console commands and imports from outside the source checkout.
+- Targeted tests now cover secret redaction, the global read-only guard,
+  typed environment parsing, and all YAML-backed inventory loaders.
 
 ### Changed
 
