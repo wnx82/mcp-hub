@@ -20,10 +20,14 @@ Fixed / Security.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-28
+
 ### Added
 
 - A sanitized Asciinema recording demonstrates a complete observation,
   confirmation, correction, and verification troubleshooting session.
+- A tracked `PROJECT_INSTRUCTIONS.example.md` template now helps operators keep
+  assistant-specific topology, risk, and workflow guidance private and local.
 - A complete Claude Code connection guide covers private and project scopes,
   bearer-token handling, verification, troubleshooting, and Desktop limits.
 - A complete environment reference documents every runtime variable, default,
@@ -38,6 +42,13 @@ Fixed / Security.
   traps, do-not-touch guidance, and its access-control limitations.
 - A minimal endpoint example demonstrates regular and opt-in intermittent
   probes for `endpoints_health`.
+- A local testing guide now covers lint, unit tests, generated-doc checks,
+  installer smoke tests, and a manual read-only server run.
+- A Docker packaging note now documents the requirements an official image
+  would need to meet before it can be recommended.
+- `mcp-hub-rescue status` now reports the systemd state, main PID, process
+  uptime, version, latest captured error, MCP endpoint details, and current
+  configuration validation state without importing the hub.
 - CI now exercises the systemd installer twice in an isolated staging tree,
   verifying installed files and preservation of local configuration.
 - CI builds and installs the wheel in a clean virtualenv, then checks both
@@ -50,6 +61,15 @@ Fixed / Security.
   and the advertised tool count.
 - CI now rejects tracked Python caches, build directories, wheels, source
   archives, and package metadata.
+- A local security-readiness script and optional pre-push hook now catch common
+  publication mistakes such as tracked private config files and hard-coded
+  tokens before a branch is pushed.
+- `mcp-hub-rescue health` now checks the service state, live process, endpoint,
+  essential imports, configuration validity, and available disk space in one
+  read-only report.
+- Predictable `get_*` and `list_*` aliases now complement several historical
+  tool names, and shared inventory/error helpers have started moving out of the
+  monolith to support that cleanup without breaking existing clients.
 - `plan_mutation` and `confirm_mutation` provide short-lived, profile-bound,
   one-time confirmation for exact mutating calls.
 - Every registered tool now publishes MCP `readOnlyHint`, `destructiveHint`,
@@ -173,6 +193,7 @@ config-driven so it can run against any fleet.
 - There is one trust level. Anyone holding the bearer token has full access;
   there is no per-tool ACL and no multi-user model.
 
-[Unreleased]: https://github.com/wnx82/mcp-hub/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/wnx82/mcp-hub/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/wnx82/mcp-hub/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/wnx82/mcp-hub/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/wnx82/mcp-hub/releases/tag/v0.1.0

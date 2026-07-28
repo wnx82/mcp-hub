@@ -68,6 +68,20 @@ class DocumentationTests(unittest.TestCase):
         self.assertGreaterEqual(len(examples), 4)
         self.assertEqual([], sorted(path for path in examples if not (ROOT / path).is_file()))
 
+    def test_private_project_instructions_template_is_tracked_and_safe(self) -> None:
+        template = (ROOT / "PROJECT_INSTRUCTIONS.example.md").read_text(encoding="utf-8")
+        gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+        self.assertIn("PROJECT_INSTRUCTIONS.md", gitignore)
+        self.assertIn("Copy this file to `PROJECT_INSTRUCTIONS.md`", template)
+        self.assertIn("Do-Not-Touch Rules", template)
+
+    def test_local_testing_and_docker_docs_are_linked(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("docs/testing-local.md", readme)
+        self.assertIn("docs/docker-packaging.md", readme)
+        self.assertTrue((ROOT / "docs" / "testing-local.md").is_file())
+        self.assertTrue((ROOT / "docs" / "docker-packaging.md").is_file())
+
     def test_generated_tool_reference_is_current(self) -> None:
         result = subprocess.run(
             ["python3", "scripts/generate_tool_reference.py", "--check"],

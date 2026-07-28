@@ -11,7 +11,9 @@ All tools return the common response envelope documented in the README.
 |---|---|---|
 | `list_hosts` | <code>list_hosts()</code> | List configured hosts with their connection metadata, roles, and tags. |
 | `topology` | <code>topology(refresh: bool = False, live: bool = True)</code> | Return the canonical mapping of containers, addresses, roles, hosts, tunnels, and warnings. |
+| `get_topology` | <code>get_topology(refresh: bool = False, live: bool = True)</code> | Alias of topology with a predictable get_* naming convention. |
 | `system_info` | <code>system_info(host: Optional[str] = None)</code> | Return an OS, uptime, CPU, memory, disk, network, and listening-port snapshot. |
+| `get_system_info` | <code>get_system_info(host: Optional[str] = None)</code> | Alias of system_info with a predictable get_* naming convention. |
 | `remote_exec` | <code>remote_exec(host: str, command: str, as_root: bool = False, timeout_seconds: int = DEFAULT_TIMEOUT)</code> | Run a shell command on a configured remote host over SSH. |
 | `local_exec` | <code>local_exec(command: str, as_root: bool = False, timeout_seconds: int = DEFAULT_TIMEOUT)</code> | Run a shell command on the MCP Hub host. |
 | `fleet_exec` | <code>fleet_exec(command: str, hosts: Optional[list[str]] = None, tags: Optional[list[str]] = None, exclude: Optional[list[str]] = None, include_hub: bool = False, as_root: bool = False, skip_unreachable: bool = True, timeout_seconds: int = DEFAULT_TIMEOUT)</code> | Run the same command concurrently across hosts selected by name or tag. Returns per-host results and an aggregate success summary. |
@@ -19,7 +21,9 @@ All tools return the common response envelope documented in the README.
 | `read_file` | <code>read_file(path: str, host: Optional[str] = None, max_bytes: int = 500000, tail_only: bool = False)</code> | Read a file locally or remotely with automatic secret redaction. |
 | `service_ctl` | <code>service_ctl(unit: str, action: Literal['status', 'start', 'stop', 'restart', 'reload', 'enable', 'disable', 'is-active', 'is-enabled'] = 'status', host: Optional[str] = None)</code> | Inspect or control a systemd service locally or on a configured host. |
 | `journal_query` | <code>journal_query(unit: Optional[str] = None, since: str = '1 hour ago', priority: str = 'warning', grep: Optional[str] = None, lines: int = 200, host: Optional[str] = None)</code> | Query journalctl with unit, time, priority, text, and line-count filters. |
+| `get_journal_entries` | <code>get_journal_entries(unit: Optional[str] = None, since: str = '1 hour ago', priority: str = 'warning', grep: Optional[str] = None, lines: int = 200, host: Optional[str] = None)</code> | Alias of journal_query with an explicit get_* action name. |
 | `apt_status` | <code>apt_status(host: Optional[str] = None)</code> | List available package updates and count security updates. |
+| `list_package_updates` | <code>list_package_updates(host: Optional[str] = None)</code> | Alias of apt_status with a clearer list_* action name. |
 | `ssh_reset_control` | <code>ssh_reset_control(host: str)</code> | Close a cached SSH ControlMaster connection for one configured host. |
 | `wake_host` | <code>wake_host(host: str, wait_port: Optional[int] = None, wait_seconds: int = 0)</code> | Wake a configured host by sending a Wake-on-LAN magic packet. |
 | `dhcp_reservations` | <code>dhcp_reservations(only_online: bool = False)</code> | Return router DHCP reservations correlated with the configured inventory. |
@@ -32,12 +36,14 @@ All tools return the common response envelope documented in the README.
 | Tool | Signature | Description |
 |---|---|---|
 | `proxmox_list` | <code>proxmox_list(host: str = DEFAULT_HOST)</code> | List LXC containers and virtual machines on a Proxmox host. |
+| `list_proxmox_guests` | <code>list_proxmox_guests(host: str = DEFAULT_HOST)</code> | Alias of proxmox_list with a clearer list_* action name. |
 | `proxmox_ct_status` | <code>proxmox_ct_status(ctid: int, host: str = DEFAULT_HOST)</code> | Return the status and configuration of a Proxmox LXC container. |
 | `proxmox_ct_exec` | <code>proxmox_ct_exec(ctid: int, command: str, host: str = DEFAULT_HOST, timeout_seconds: int = DEFAULT_TIMEOUT)</code> | Run a command inside a Proxmox LXC container through pct exec. |
 | `ct_exec` | <code>ct_exec(ctid: int, command: str, host: str = DEFAULT_HOST, shell: str = 'bash', timeout_seconds: int = DEFAULT_TIMEOUT)</code> | Run a script inside an LXC container without host-side variable expansion. |
 | `ct_write_file` | <code>ct_write_file(ctid: int, path: str, content: str, host: str = DEFAULT_HOST, mode: Optional[str] = None, make_parents: bool = True)</code> | Write a file inside an LXC container after capturing its prior state. |
 | `pbs_status` | <code>pbs_status(host: str = DEFAULT_HOST, ctid: int = 108, datastore: str = '/mnt/datastore-hdd')</code> | Proxmox Backup Server state: datastore free space and approximate snapshot-group count per namespace. Read-only. |
 | `docker_ps` | <code>docker_ps(host: str = DEFAULT_HOST, ctid: Optional[int] = None)</code> | List Docker containers. On a Proxmox hypervisor, ALWAYS pass ctid= to target the LXC that actually runs Docker. Without ctid, `host` must itself be a Docker host. |
+| `list_docker_containers` | <code>list_docker_containers(host: str = DEFAULT_HOST, ctid: Optional[int] = None)</code> | Alias of docker_ps with a clearer list_* action name. |
 | `docker_exec` | <code>docker_exec(container: str, command: str, host: str = DEFAULT_HOST, ctid: Optional[int] = None, timeout_seconds: int = DEFAULT_TIMEOUT)</code> | Run a command inside a Docker container. On a Proxmox hypervisor, ALWAYS pass ctid= to target the LXC that actually runs Docker. |
 
 ## Synology DSM
@@ -67,6 +73,7 @@ All tools return the common response envelope documented in the README.
 | Tool | Signature | Description |
 |---|---|---|
 | `cloudflare_tunnels_list` | <code>cloudflare_tunnels_list()</code> | List active Cloudflare tunnels for the configured account. |
+| `list_cloudflare_tunnels` | <code>list_cloudflare_tunnels()</code> | Alias of cloudflare_tunnels_list with a clearer list_* action name. |
 | `cloudflare_tunnel_get` | <code>cloudflare_tunnel_get(tunnel_id: str)</code> | Return details for a Cloudflare tunnel by ID. |
 | `cloudflare_tunnel_config_get` | <code>cloudflare_tunnel_config_get(tunnel_id: str)</code> | Return the ingress configuration of a Cloudflare tunnel. |
 | `cloudflare_tunnel_config_update` | <code>cloudflare_tunnel_config_update(tunnel_id: str, ingress: list[dict])</code> | Replace tunnel ingress rules after capturing a reversible snapshot. |
@@ -74,6 +81,7 @@ All tools return the common response envelope documented in the README.
 | `cloudflare_dns_create` | <code>cloudflare_dns_create(name: str, type: str, content: str, proxied: bool = True, ttl: int = 1, zone_id: Optional[str] = None)</code> | Create a DNS record in the configured Cloudflare zone. |
 | `cloudflare_dns_delete` | <code>cloudflare_dns_delete(record_id: str, zone_id: Optional[str] = None)</code> | Delete a Cloudflare DNS record by ID. |
 | `cf_ingress_dump` | <code>cf_ingress_dump(tunnel_id: str = '')</code> | hostname -> service ingress table for a Cloudflare tunnel, flattened into a readable list. Read-only. |
+| `get_cloudflare_tunnel_ingress` | <code>get_cloudflare_tunnel_ingress(tunnel_id: str = '')</code> | Alias of cf_ingress_dump with a clearer get_* action name. |
 | `cloudflare_api` | <code>cloudflare_api(method: Literal['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], path: str, json_body: Optional[dict] = None)</code> | Call an allowlisted path on the Cloudflare API. |
 
 ## n8n
@@ -142,7 +150,9 @@ All tools return the common response envelope documented in the README.
 | `job_list` | <code>job_list(limit: int = 20)</code> | List recently recorded background jobs with target, label, and creation time. |
 | `job_logs` | <code>job_logs(job_id: str, from_line: int = 0, max_lines: int = 300)</code> | Return a bounded, incremental range of background-job log lines. |
 | `mcp_health` | <code>mcp_health()</code> | Report hub health and probe every configured host concurrently over SSH. |
+| `get_mcp_health` | <code>get_mcp_health()</code> | Alias of mcp_health with a predictable get_* naming convention. |
 | `mcp_stats` | <code>mcp_stats(last_n: int = 200)</code> | Summarize recent tool calls, latency, return codes, and errors. |
+| `get_mcp_stats` | <code>get_mcp_stats(last_n: int = 200)</code> | Alias of mcp_stats with a predictable get_* naming convention. |
 | `audit_export` | <code>audit_export(last_n: int = 100)</code> | Export a bounded JSON-ready audit trail without full tool payloads or secrets. |
 | `plan_mutation` | <code>plan_mutation(tool: str, arguments: dict[str, Any])</code> | Create a short-lived, one-time confirmation plan for an exact mutating tool call. |
 | `confirm_mutation` | <code>confirm_mutation(confirmation_token: str)</code> | Execute one previously planned mutation and consume its confirmation token. |

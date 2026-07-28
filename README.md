@@ -47,6 +47,7 @@ installed; the cast format is newline-delimited JSON and remains reviewable.
 - [Features](#features)
 - [Quick start](#quick-start)
 - [Deployment](#deployment)
+- [Local testing](#local-testing)
 - [Rescue diagnostics](#rescue-diagnostics)
 - [Configuration](#configuration)
 - [Tool reference](#tool-reference)
@@ -56,7 +57,7 @@ installed; the cast format is newline-delimited JSON and remains reviewable.
 
 ## Features
 
-- **93 tools**, one endpoint, one config file.
+- **103 tools**, one endpoint, one config file.
 - **Config-driven.** Your network lives in `hosts.yaml` and `.env`. Nothing about
   your infrastructure is baked into the code.
 - **Multiplexed SSH.** Persistent control sockets, so fleet-wide commands take
@@ -111,6 +112,11 @@ For a complete Claude Code setup, safe token handling, connection checks, a
 first read-only prompt, and the current Claude Desktop limitation, see
 **[Connect MCP Hub to Claude](docs/claude-clients.md)**.
 
+If you want your assistant to understand your private topology, host roles,
+change windows, and MCP operating rules without committing any of that data,
+start from [`PROJECT_INSTRUCTIONS.example.md`](PROJECT_INSTRUCTIONS.example.md)
+and keep your customized `PROJECT_INSTRUCTIONS.md` local-only.
+
 ## Deployment
 
 MCP Hub supports three execution modes:
@@ -131,6 +137,31 @@ Container images are not an official deployment target yet. The hub needs
 network access, an SSH identity, persistent `state.db`, and access to its local
 inventory; operators packaging it in a container must preserve those
 properties themselves.
+
+See [`docs/docker-packaging.md`](docs/docker-packaging.md) for the current
+requirements and what an official image would need to guarantee before it could
+be recommended.
+
+## Local testing
+
+For a contributor-focused checklist covering lint, unit tests, tool
+registration, generated docs, installer smoke tests, and a manual read-only
+run, see **[docs/testing-local.md](docs/testing-local.md)**.
+
+Before opening a PR or publishing a branch, you can also run the local release
+readiness checks:
+
+```bash
+python3 scripts/check_repo_hygiene.py
+python3 scripts/check_tool_annotations.py
+python3 scripts/check_security_readiness.py
+```
+
+To wire the security readiness check into Git automatically on push:
+
+```bash
+./scripts/install_pre_push_hook.sh
+```
 
 ## Architecture
 
@@ -211,6 +242,11 @@ redirects are not followed.
 The complete defaults, limits, integration settings, and secret-handling notes
 are in the **[environment variable reference](docs/environment.md)**.
 
+Pair those tracked examples with a private, untracked
+`PROJECT_INSTRUCTIONS.md` so your assistant sees topology caveats, maintenance
+windows, naming conventions, and "do not touch" guidance that should not live
+in the repository.
+
 ## Tool reference
 
 Every tool returns the same top-level envelope:
@@ -238,16 +274,16 @@ and audit trail as every other call.
 
 | Group | Tools |
 |---|---|
-| **Fleet & shell** | `list_hosts` `topology` `system_info` `remote_exec` `local_exec` `fleet_exec` `batch_exec` `read_file` `service_ctl` `journal_query` `apt_status` `ssh_reset_control` `wake_host` `dhcp_reservations` `endpoints_health` `infra_snapshot` `destroy_resource` |
-| **Proxmox & containers** | `proxmox_list` `proxmox_ct_status` `proxmox_ct_exec` `ct_exec` `ct_write_file` `pbs_status` `docker_ps` `docker_exec` |
+| **Fleet & shell** | `list_hosts` `topology` `get_topology` `system_info` `get_system_info` `remote_exec` `local_exec` `fleet_exec` `batch_exec` `read_file` `service_ctl` `journal_query` `get_journal_entries` `apt_status` `list_package_updates` `ssh_reset_control` `wake_host` `dhcp_reservations` `endpoints_health` `infra_snapshot` `destroy_resource` |
+| **Proxmox & containers** | `proxmox_list` `list_proxmox_guests` `proxmox_ct_status` `proxmox_ct_exec` `ct_exec` `ct_write_file` `pbs_status` `docker_ps` `list_docker_containers` `docker_exec` |
 | **Synology DSM** | `dsm_health` `dsm_system_info` `dsm_storage` `dsm_shares` `dsm_packages` `dsm_package_control` `dsm_updates` `dsm_connections` `dsm_logs` `dsm_power` `dsm_file_list` `dsm_file_search` `dsm_download_list` `dsm_download_create` `dsm_download_control` `dsm_api` `dsm_relogin` |
-| **Cloudflare** | `cloudflare_tunnels_list` `cloudflare_tunnel_get` `cloudflare_tunnel_config_get` `cloudflare_tunnel_config_update` `cloudflare_dns_list` `cloudflare_dns_create` `cloudflare_dns_delete` `cf_ingress_dump` `cloudflare_api` |
+| **Cloudflare** | `cloudflare_tunnels_list` `list_cloudflare_tunnels` `cloudflare_tunnel_get` `cloudflare_tunnel_config_get` `cloudflare_tunnel_config_update` `cloudflare_dns_list` `cloudflare_dns_create` `cloudflare_dns_delete` `cf_ingress_dump` `get_cloudflare_tunnel_ingress` `cloudflare_api` |
 | **n8n** | `n8n_health` `n8n_list_workflows` `n8n_get_workflow` `n8n_activate_workflow` `n8n_deactivate_workflow` `n8n_list_executions` `n8n_get_execution` `n8n_call_webhook` |
 | **Notion** | `notion_search` `notion_get_page` `notion_create_page` `notion_update_page` `notion_archive_page` `notion_query_database` `notion_get_block_children` `notion_append_blocks` `notion_append_table_row` `notion_delete_block` `notion_reload_token` |
 | **Vault** | `vault_search` `vault_get_item` `vault_get_field` `vault_create_item` `vault_update_item` `vault_list_folders` |
 | **LM Studio** | `lmstudio_status` `lmstudio_load` `lmstudio_unload` |
 | **Guided diagnostics** | `diagnose_service` `diagnose_endpoint` `audit_host` `check_backup_chain` |
-| **Jobs & introspection** | `job_run` `job_status` `job_list` `job_logs` `mcp_health` `mcp_stats` `audit_export` `plan_mutation` `confirm_mutation` `rollback_change` |
+| **Jobs & introspection** | `job_run` `job_status` `job_list` `job_logs` `mcp_health` `get_mcp_health` `mcp_stats` `get_mcp_stats` `audit_export` `plan_mutation` `confirm_mutation` `rollback_change` |
 
 The **[complete generated tool reference](docs/tool-reference.md)** expands
 every group into a table with each tool's exact signature and model-facing
@@ -272,6 +308,11 @@ MCP Hub is a remote code execution service by design. Before exposing it:
 
 Full threat model, hardening guide, and vulnerability reporting:
 **[SECURITY.md](SECURITY.md)**.
+
+For a local pre-publish checklist and optional Git hook that catches common
+secret-leak mistakes before push, see
+[`scripts/check_security_readiness.py`](scripts/check_security_readiness.py)
+and [`scripts/install_pre_push_hook.sh`](scripts/install_pre_push_hook.sh).
 
 ## Versioning
 

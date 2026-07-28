@@ -64,6 +64,27 @@ Ordered roughly by how much it matters:
    account-wide token.
 8. **Read `journal_query` / `job_logs` occasionally.** Know what it did.
 
+## Before publishing anything
+
+If you fork, package, or submit changes publicly, run:
+
+```bash
+python3 scripts/check_security_readiness.py
+```
+
+It is a local best-effort guard against common publication mistakes:
+
+- Tracked private operator files such as `.env`, `hosts.yaml`, or
+  `PROJECT_INSTRUCTIONS.md`.
+- Obvious private key material.
+- Non-empty hard-coded tokens in tracked text files.
+
+If you want that guard to run automatically before every push:
+
+```bash
+./scripts/install_pre_push_hook.sh
+```
+
 ## Access profiles
 
 Set `MCP_AUTH_PROFILES_FILE` to a root-owned JSON file based on

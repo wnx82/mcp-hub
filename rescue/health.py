@@ -180,6 +180,83 @@ def service_status(service: str) -> dict[str, Any]:
     }
 
 
+def process_status(pid: int) -> dict[str, Any]:
+    if pid <= 0:
+        return {
+            "ok": False,
+            "pid": pid,
+            "running": False,
+            "uptime_seconds": None,
+            "error": "service has no main PID",
+        }
+    result = run_command(["ps", "-p", str(pid), "-o", "pid=,etimes=,comm="], timeout=5)
+    if not result["ok"] or not result["stdout"]:
+        return {
+            "ok": False,
+            "pid": pid,
+            "running": False,
+            "uptime_seconds": None,
+            "error": result["stderr"] or "process not found",
+        }
+    fields = result["stdout"].split(None, 2)
+    uptime_seconds = None
+    if len(fields) >= 2:
+        try:
+            uptime_seconds = int(fields[1])
+        except ValueError:
+            uptime_seconds = None
+    return {
+        "ok": True,
+        "pid": pid,
+        "running": True,
+        "uptime_seconds": uptime_seconds,
+        "command": fields[2].strip() if len(fields) >= 3 else None,
+        "error": None,
+    }
+
+
+def latest_service_error(service: str, hub_home: Path = DEFAULT_HUB_HOME) -> dict[str, Any]:
+    journal = run_command([
+        "journalctl",
+        "--unit",
+        service,
+        "--priority",
+        "3",
+        "--lines",
+        "1",
+        "--no-pager",
+        "--output",
+        "short-iso",
+    ])
+    if journal["stdout"]:
+        return {
+            "ok": True,
+            "source": "journal",
+            "message": journal["stdout"].splitlines()[-1],
+            "error": None,
+        }
+    log_path = hub_home / "mcp-hub.log"
+    try:
+        if log_path.is_file():
+            lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            for line in reversed(lines[-200:]):
+                if "ERROR" in line or "CRITICAL" in line or "Traceback" in line:
+                    return {
+                        "ok": True,
+                        "source": "file",
+                        "message": line,
+                        "error": None,
+                    }
+    except OSError as exc:
+        return {"ok": False, "source": "file", "message": None, "error": str(exc)}
+    return {
+        "ok": True,
+        "source": "none",
+        "message": None,
+        "error": journal["stderr"] or None,
+    }
+
+
 def probe_endpoint(hub_home: Path, env_file: Path, timeout: float = 3.0) -> dict[str, Any]:
     values = resolved_environment(hub_home, env_file)
     host = values.get("MCP_BIND_ADDR", "127.0.0.1")
@@ -195,6 +272,7 @@ def probe_endpoint(hub_home: Path, env_file: Path, timeout: float = 3.0) -> dict
         path = "/" + path
     token = values.get("MCP_AUTH_TOKEN", "")
     headers = {"Authorization": f"Bearer {token}"} if token else {}
+    endpoint_url = f"http://{host}:{port}{path}"
 
     try:
         with socket.create_connection((host, port), timeout=timeout):
@@ -204,6 +282,9 @@ def probe_endpoint(hub_home: Path, env_file: Path, timeout: float = 3.0) -> dict
             "ok": False,
             "host": host,
             "port": port,
+            "path": path,
+            "url": endpoint_url,
+            "auth_configured": bool(token),
             "tcp": False,
             "http_status": None,
             "error": str(exc),
@@ -218,6 +299,9 @@ def probe_endpoint(hub_home: Path, env_file: Path, timeout: float = 3.0) -> dict
             "ok": True,
             "host": host,
             "port": port,
+            "path": path,
+            "url": endpoint_url,
+            "auth_configured": bool(token),
             "tcp": True,
             "http_status": response.status,
             "error": None,
@@ -227,6 +311,9 @@ def probe_endpoint(hub_home: Path, env_file: Path, timeout: float = 3.0) -> dict
             "ok": False,
             "host": host,
             "port": port,
+            "path": path,
+            "url": endpoint_url,
+            "auth_configured": bool(token),
             "tcp": True,
             "http_status": None,
             "error": str(exc),
@@ -278,14 +365,29 @@ def get_status(
     env_file: Path = DEFAULT_ENV_FILE,
 ) -> dict[str, Any]:
     service_info = service_status(service)
+    process_info = process_status(service_info["pid"])
+    from .diagnose import validate_config
+
+    configuration = validate_config(hub_home, env_file)
+    version = read_version(hub_home)
+    endpoint = probe_endpoint(hub_home, env_file)
+    last_error = latest_service_error(service, hub_home)
     return {
-        "ok": service_info["active_state"] == "active",
+        "ok": (
+            service_info["active_state"] == "active"
+            and process_info["ok"]
+            and version["ok"]
+            and configuration["ok"]
+        ),
         "request_id": new_request_id(),
         "timestamp": utc_now(),
         "hub_home": str(hub_home),
         "service": service_info,
-        "version": read_version(hub_home),
-        "endpoint": probe_endpoint(hub_home, env_file),
+        "process": process_info,
+        "version": version,
+        "last_error": last_error,
+        "endpoint": endpoint,
+        "configuration": configuration,
     }
 
 
@@ -295,11 +397,17 @@ def health_check(
     env_file: Path = DEFAULT_ENV_FILE,
     minimum_disk_mb: int = DEFAULT_MIN_DISK_MB,
 ) -> dict[str, Any]:
+    service = service_status(service)
+    process = process_status(service["pid"])
+    from .diagnose import validate_config
+
     checks = {
-        "service": service_status(service),
+        "service": service,
+        "process": process,
         "version": read_version(hub_home),
         "endpoint": probe_endpoint(hub_home, env_file),
         "imports": check_imports(hub_home),
+        "configuration": validate_config(hub_home, env_file),
         "disk": disk_status(hub_home, minimum_disk_mb),
     }
     return {

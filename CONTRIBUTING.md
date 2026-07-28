@@ -25,6 +25,9 @@ cp hosts.example.yaml hosts.yaml
 ```bash
 ruff check .
 python -m py_compile server.py config.py
+python -m unittest
+python3 scripts/check_tool_annotations.py
+python3 scripts/check_security_readiness.py
 ```
 
 `ruff format` is intentionally *not* enforced — reformatting the monolith
@@ -40,18 +43,31 @@ print(len(asyncio.run(server.mcp.list_tools())), 'tools registered')
 "
 ```
 
+For the fuller contributor checklist, installer smoke test, and manual local
+run flow, see [docs/testing-local.md](docs/testing-local.md).
+
+If you keep private assistant instructions next to the repo, use the tracked
+[`PROJECT_INSTRUCTIONS.example.md`](PROJECT_INSTRUCTIONS.example.md) template
+and keep your real `PROJECT_INSTRUCTIONS.md` untracked.
+
 ## Adding a tool
 
 1. Put protocol logic and pure helpers in the matching `tools/<domain>.py`
    module, register ownership through `tools/registry.py`, and keep only the
    FastMCP adapter in `server.py`. The tool docstring is the model-facing
    documentation, so say what it does and what it will refuse to do.
+   Prefer predictable public names such as `list_*` for bounded collection
+   reads, `get_*` for one snapshot or object fetch, and explicit verbs for
+   mutations. When an older public name already exists, prefer adding a clear
+   alias rather than silently breaking clients.
 2. **If it mutates anything, add its name to `config.MUTATING_TOOLS`.** This is
    what `MCP_READ_ONLY` keys off. A mutating tool missing from that set is a
    security bug, not a style issue.
 3. Never hard-code an address, path, or credential. It goes in `config.py`,
    read from the environment or a YAML file, with a safe default.
-4. Add it to the tool table in the README.
+4. Reuse shared helpers such as `tools.common` and `tools.inventory` when they
+   already cover config lookup, host resolution, or common error payloads.
+5. Add it to the tool table in the README.
 
 ## Adding an integration
 
@@ -84,6 +100,23 @@ nothing for an operator do not.
 If your change alters a **security default** — a bind address, an auth
 requirement, what `MCP_READ_ONLY` covers — it goes under `Security`, whether
 it tightens or loosens things.
+
+## Pre-push safety check
+
+Before publishing a branch, run:
+
+```bash
+python3 scripts/check_security_readiness.py
+```
+
+It fails on common mistakes like tracked local config files, checked-in private
+instructions, obvious private keys, and non-empty hard-coded tokens.
+
+To run it automatically on every `git push`:
+
+```bash
+./scripts/install_pre_push_hook.sh
+```
 
 ## Releasing
 

@@ -81,6 +81,110 @@ class RescueHealthTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("virtualenv", result["error"])
 
+    def test_process_status_reports_uptime_for_running_pid(self) -> None:
+        with mock.patch(
+            "rescue.health.run_command",
+            return_value={"ok": True, "return_code": 0, "stdout": "123 456 python\n", "stderr": ""},
+        ):
+            result = health.process_status(123)
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["running"])
+        self.assertEqual(456, result["uptime_seconds"])
+        self.assertEqual("python", result["command"])
+
+    def test_status_includes_process_endpoint_last_error_and_config(self) -> None:
+        service_info = {
+            "ok": True,
+            "service": "mcp-hub.service",
+            "load_state": "loaded",
+            "active_state": "active",
+            "sub_state": "running",
+            "pid": 4242,
+            "exit_status": 0,
+            "restart_count": 1,
+            "active_since": "Tue 2026-07-28 12:00:00 UTC",
+            "error": None,
+        }
+        with (
+            mock.patch("rescue.health.service_status", return_value=service_info),
+            mock.patch(
+                "rescue.health.process_status",
+                return_value={
+                    "ok": True,
+                    "pid": 4242,
+                    "running": True,
+                    "uptime_seconds": 300,
+                    "command": "python",
+                    "error": None,
+                },
+            ),
+            mock.patch(
+                "rescue.health.read_version",
+                return_value={"ok": True, "version": "1.2.3", "error": None, "path": "/tmp/_version.py"},
+            ),
+            mock.patch(
+                "rescue.health.probe_endpoint",
+                return_value={
+                    "ok": True,
+                    "host": "127.0.0.1",
+                    "port": 8000,
+                    "path": "/mcp",
+                    "url": "http://127.0.0.1:8000/mcp",
+                    "auth_configured": True,
+                    "tcp": True,
+                    "http_status": 401,
+                    "error": None,
+                },
+            ),
+            mock.patch(
+                "rescue.health.latest_service_error",
+                return_value={"ok": True, "source": "journal", "message": "last error line", "error": None},
+            ),
+            mock.patch(
+                "rescue.diagnose.validate_config",
+                return_value={"ok": True, "files": [{"file": "hosts.yaml", "status": "valid"}]},
+            ),
+        ):
+            result = health.get_status(Path("/tmp/hub"), "mcp-hub.service", Path("/tmp/env"))
+        self.assertTrue(result["ok"])
+        self.assertEqual(4242, result["process"]["pid"])
+        self.assertEqual(300, result["process"]["uptime_seconds"])
+        self.assertEqual("http://127.0.0.1:8000/mcp", result["endpoint"]["url"])
+        self.assertEqual("last error line", result["last_error"]["message"])
+        self.assertTrue(result["configuration"]["ok"])
+
+    def test_health_check_includes_all_requested_checks(self) -> None:
+        service_info = {
+            "ok": True,
+            "service": "mcp-hub.service",
+            "load_state": "loaded",
+            "active_state": "active",
+            "sub_state": "running",
+            "pid": 4242,
+            "exit_status": 0,
+            "restart_count": 0,
+            "active_since": "Tue 2026-07-28 12:00:00 UTC",
+            "error": None,
+        }
+        with (
+            mock.patch("rescue.health.service_status", return_value=service_info),
+            mock.patch(
+                "rescue.health.process_status",
+                return_value={"ok": True, "pid": 4242, "running": True, "uptime_seconds": 90, "error": None},
+            ),
+            mock.patch("rescue.health.read_version", return_value={"ok": True, "version": "1.2.3"}),
+            mock.patch("rescue.health.probe_endpoint", return_value={"ok": True, "url": "http://127.0.0.1:8000/mcp"}),
+            mock.patch("rescue.health.check_imports", return_value={"ok": True}),
+            mock.patch("rescue.health.disk_status", return_value={"ok": True, "free_mb": 1024}),
+            mock.patch("rescue.diagnose.validate_config", return_value={"ok": True, "files": []}),
+        ):
+            result = health.health_check(Path("/tmp/hub"), "mcp-hub.service", Path("/tmp/env"))
+        self.assertTrue(result["ok"])
+        self.assertEqual(
+            {"service", "process", "version", "endpoint", "imports", "configuration", "disk"},
+            set(result["checks"]),
+        )
+
 
 class RescueDiagnosticsTests(unittest.TestCase):
     def test_log_limit_is_capped(self) -> None:

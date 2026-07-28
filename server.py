@@ -27,7 +27,6 @@ from logging.handlers import RotatingFileHandler
 from typing import Any, Literal, Optional
 
 import httpx
-import yaml
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
@@ -42,6 +41,7 @@ from tools.cloudflare import (
     tunnel_config_path,
     tunnel_path,
 )
+from tools.common import missing_config, tool_error
 from tools.dsm import (
     AUTH_ERROR_CODES as _DSM_AUTH_ERROR_CODES,
 )
@@ -54,7 +54,18 @@ from tools.dsm import (
 from tools.dsm import (
     endpoint as dsm_endpoint,
 )
-from tools.inventory import list_hosts as list_hosts_tool
+from tools.inventory import (
+    get_host as inventory_get_host,
+)
+from tools.inventory import (
+    hypervisor_hosts as inventory_hypervisor_hosts,
+)
+from tools.inventory import (
+    list_hosts as list_hosts_tool,
+)
+from tools.inventory import (
+    load_hosts as inventory_load_hosts,
+)
 from tools.playbooks import (
     backup_chain_command,
     host_audit_command,
@@ -228,30 +239,16 @@ def _log_call(tool, host, args, duration_ms, return_code, error=None):
         log.warning(f"call_log insert failed: {e}")
 
 
-# --- Inventaire hosts ---
 def _load_hosts() -> dict[str, dict]:
-    if not HOSTS_FILE.exists():
-        return {}
-    with open(HOSTS_FILE) as f:
-        return (yaml.safe_load(f) or {}).get("hosts", {})
+    return inventory_load_hosts()
 
 
 def _get_host(name: str) -> dict:
-    hosts = _load_hosts()
-    if name not in hosts:
-        raise ValueError(f"Unknown host {name!r}. Configured: {sorted(hosts.keys())}")
-    return hosts[name]
+    return inventory_get_host(name)
 
 
 def _hypervisor_hosts() -> list[str]:
-    """Hosts declared as hypervisors in hosts.yaml (by role or by tag)."""
-    out = []
-    for name, info in _load_hosts().items():
-        role = str(info.get("role") or "").lower()
-        tags = [str(t).lower() for t in (info.get("tags") or [])]
-        if "hypervisor" in role or "proxmox" in tags or "pve" in tags:
-            out.append(name)
-    return out
+    return inventory_hypervisor_hosts()
 
 
 # --- Execution locale ---
@@ -343,7 +340,7 @@ async def _ssh_run(host: str, command: str, as_root: bool = False, timeout: int 
 # --- Client Cloudflare API ---
 async def _cf_api(method: str, path: str, json_body: Optional[dict] = None, timeout: float = 30.0) -> dict:
     if not CF_API_TOKEN:
-        return {"error": "CLOUDFLARE_API_TOKEN non configure"}
+        return missing_config("CLOUDFLARE_API_TOKEN")
     if not path.startswith("/"):
         path = "/" + path
     started = datetime.now()
@@ -368,7 +365,7 @@ async def _cf_api(method: str, path: str, json_body: Optional[dict] = None, time
     except Exception as e:
         duration_ms = int((datetime.now() - started).total_seconds() * 1000)
         _log_call("cloudflare_api", None, {"method": method, "path": path}, duration_ms, None, str(e))
-        return {"error": str(e), "duration_ms": duration_ms}
+        return tool_error(str(e), duration_ms=duration_ms)
 
 
 
@@ -729,6 +726,12 @@ async def mcp_health() -> dict[str, Any]:
     }
 
 
+@mcp.tool()
+async def get_mcp_health() -> dict[str, Any]:
+    """Alias of mcp_health with a predictable get_* naming convention."""
+    return await mcp_health.__wrapped__()
+
+
 list_hosts = mcp.tool()(list_hosts_tool)
 
 
@@ -766,6 +769,12 @@ async def system_info(host: Optional[str] = None) -> dict[str, Any]:
     if host is None:
         return await _with_tool("system_info", _local_run(combined, as_root=True, timeout=30))
     return await _with_tool("system_info", _ssh_run(host, combined, as_root=True, timeout=30))
+
+
+@mcp.tool()
+async def get_system_info(host: Optional[str] = None) -> dict[str, Any]:
+    """Alias of system_info with a predictable get_* naming convention."""
+    return await system_info.__wrapped__(host=host)
 
 
 @mcp.tool()
@@ -827,6 +836,26 @@ async def journal_query(
 
 
 @mcp.tool()
+async def get_journal_entries(
+    unit: Optional[str] = None,
+    since: str = "1 hour ago",
+    priority: str = "warning",
+    grep: Optional[str] = None,
+    lines: int = 200,
+    host: Optional[str] = None,
+) -> dict[str, Any]:
+    """Alias of journal_query with an explicit get_* action name."""
+    return await journal_query.__wrapped__(
+        unit=unit,
+        since=since,
+        priority=priority,
+        grep=grep,
+        lines=lines,
+        host=host,
+    )
+
+
+@mcp.tool()
 async def apt_status(host: Optional[str] = None) -> dict[str, Any]:
     """List available package updates and count security updates."""
     cmd = "apt list --upgradable 2>/dev/null | tail -n +2"
@@ -835,12 +864,24 @@ async def apt_status(host: Optional[str] = None) -> dict[str, Any]:
     return await _with_tool("apt_status", _ssh_run(host, cmd, as_root=True, timeout=45))
 
 
+@mcp.tool()
+async def list_package_updates(host: Optional[str] = None) -> dict[str, Any]:
+    """Alias of apt_status with a clearer list_* action name."""
+    return await apt_status.__wrapped__(host=host)
+
+
 # === TOOLS - Proxmox ===
 @mcp.tool()
 async def proxmox_list(host: str = DEFAULT_HOST) -> dict[str, Any]:
     """List LXC containers and virtual machines on a Proxmox host."""
     cmd = "echo === LXC ===; pct list 2>&1; echo; echo === VMs ===; qm list 2>&1"
     return await _with_tool("proxmox_list", _ssh_run(host, cmd, as_root=True, timeout=15))
+
+
+@mcp.tool()
+async def list_proxmox_guests(host: str = DEFAULT_HOST) -> dict[str, Any]:
+    """Alias of proxmox_list with a clearer list_* action name."""
+    return await proxmox_list.__wrapped__(host=host)
 
 
 @mcp.tool()
@@ -869,6 +910,12 @@ async def docker_ps(host: str = DEFAULT_HOST, ctid: Optional[int] = None) -> dic
 
 
 @mcp.tool()
+async def list_docker_containers(host: str = DEFAULT_HOST, ctid: Optional[int] = None) -> dict[str, Any]:
+    """Alias of docker_ps with a clearer list_* action name."""
+    return await docker_ps.__wrapped__(host=host, ctid=ctid)
+
+
+@mcp.tool()
 async def docker_exec(container: str, command: str, host: str = DEFAULT_HOST, ctid: Optional[int] = None, timeout_seconds: int = DEFAULT_TIMEOUT) -> dict[str, Any]:
     """Run a command inside a Docker container. On a Proxmox hypervisor,
     ALWAYS pass ctid= to target the LXC that actually runs Docker."""
@@ -885,6 +932,12 @@ async def cloudflare_tunnels_list() -> dict[str, Any]:
         "cloudflare_tunnels_list",
         _cf_api("GET", f"{tunnel_path(CF_ACCOUNT_ID)}?is_deleted=false"),
     )
+
+
+@mcp.tool()
+async def list_cloudflare_tunnels() -> dict[str, Any]:
+    """Alias of cloudflare_tunnels_list with a clearer list_* action name."""
+    return await cloudflare_tunnels_list.__wrapped__()
 
 
 @mcp.tool()
@@ -1005,6 +1058,12 @@ def mcp_stats(last_n: int = 200) -> dict[str, Any]:
             for r in rows
         ],
     }
+
+
+@mcp.tool()
+def get_mcp_stats(last_n: int = 200) -> dict[str, Any]:
+    """Alias of mcp_stats with a predictable get_* naming convention."""
+    return mcp_stats.__wrapped__(last_n=last_n)
 
 
 @mcp.tool()
@@ -1271,13 +1330,13 @@ async def _bw_request(method: str, path: str, params: Optional[dict] = None, jso
         try:
             r = await client.request(method, f"{BW_SERVE_URL}{path}", params=params, json=json_body)
         except httpx.RequestError as e:
-            return {"error": f"bw serve unreachable at {BW_SERVE_URL}: {e}"}
+            return tool_error(f"bw serve unreachable at {BW_SERVE_URL}: {e}")
     try:
         data = r.json()
     except Exception:
-        return {"error": f"bw serve returned non-JSON: {r.text[:200]}", "status": r.status_code}
+        return tool_error(f"bw serve returned non-JSON: {r.text[:200]}", status=r.status_code)
     if not r.is_success or not data.get("success", True):
-        return {"error": data.get("message", f"HTTP {r.status_code}"), "raw": data}
+        return tool_error(data.get("message", f"HTTP {r.status_code}"), raw=data)
     return data
 
 
@@ -1455,7 +1514,7 @@ async def _notion_request(
     try:
         token = await _notion_get_token()
     except Exception as e:
-        return {"error": f"token fetch failed: {e}"}
+        return tool_error(f"token fetch failed: {e}")
     headers = {
         "Authorization": f"Bearer {token}",
         "Notion-Version": NOTION_VERSION,
@@ -1471,17 +1530,17 @@ async def _notion_request(
                 headers=headers,
             )
         except httpx.RequestError as e:
-            return {"error": f"Notion API unreachable: {e}"}
+            return tool_error(f"Notion API unreachable: {e}")
     try:
         data = r.json()
     except Exception:
-        return {"error": f"Notion returned non-JSON: {r.text[:300]}", "status": r.status_code}
+        return tool_error(f"Notion returned non-JSON: {r.text[:300]}", status=r.status_code)
     if not r.is_success:
-        return {
-            "error": data.get("message", f"HTTP {r.status_code}"),
-            "code": data.get("code"),
-            "status": r.status_code,
-        }
+        return tool_error(
+            data.get("message", f"HTTP {r.status_code}"),
+            code=data.get("code"),
+            status=r.status_code,
+        )
     return data
 
 
@@ -1718,7 +1777,7 @@ async def _n8n_request(
 ) -> dict[str, Any]:
     """Appel de l'API REST n8n. Retourne {http_status, success, data|error}."""
     if not N8N_API_KEY:
-        return {"success": False, "error": "N8N_API_KEY is not set (see .env.example)"}
+        return {"success": False, **missing_config("N8N_API_KEY", hint="set N8N_API_KEY in .env.example-compatible local config")}
     headers = {
         "X-N8N-API-KEY": N8N_API_KEY,
         "Accept": "application/json",
@@ -1735,7 +1794,7 @@ async def _n8n_request(
                 headers=headers,
             )
     except Exception as exc:
-        return {"success": False, "error": f"{type(exc).__name__}: {exc}"}
+        return {"success": False, **tool_error(f"{type(exc).__name__}: {exc}")}
     duration_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
     out: dict[str, Any] = {
         "http_status": resp.status_code,
@@ -3261,6 +3320,12 @@ async def topology(refresh: bool = False, live: bool = True) -> dict[str, Any]:
     return result
 
 
+@mcp.tool()
+async def get_topology(refresh: bool = False, live: bool = True) -> dict[str, Any]:
+    """Alias of topology with a predictable get_* naming convention."""
+    return await topology.__wrapped__(refresh=refresh, live=live)
+
+
 # ============================================================================
 # === 4. Garde destructif (suppression en 2 etapes) =========================
 # ============================================================================
@@ -3406,15 +3471,18 @@ async def cf_ingress_dump(
     """
     tunnel_id = tunnel_id or config.CF_DEFAULT_TUNNEL_ID
     if not CF_ACCOUNT_ID:
-        return {"error": "CLOUDFLARE_ACCOUNT_ID is not configured"}
+        return missing_config("CLOUDFLARE_ACCOUNT_ID")
     if not tunnel_id:
-        return {"error": "no tunnel_id given and CLOUDFLARE_DEFAULT_TUNNEL_ID is unset"}
+        return tool_error(
+            "no tunnel_id given and CLOUDFLARE_DEFAULT_TUNNEL_ID is unset",
+            hint="pass tunnel_id explicitly or set CLOUDFLARE_DEFAULT_TUNNEL_ID",
+        )
     r = await _cf_api(
         "GET",
         tunnel_config_path(CF_ACCOUNT_ID, tunnel_id),
     )
     if not r.get("success", False):
-        return {"error": "echec API Cloudflare", "detail": r}
+        return tool_error("Cloudflare API request failed", detail=r)
     ingress = (((r.get("data") or {}).get("result") or {}).get("config") or {}).get("ingress", [])
     table = []
     for rule in ingress:
@@ -3424,6 +3492,12 @@ async def cf_ingress_dump(
             "service": rule.get("service"),
         })
     return {"tunnel_id": tunnel_id, "rules": len(table), "ingress": table}
+
+
+@mcp.tool()
+async def get_cloudflare_tunnel_ingress(tunnel_id: str = "") -> dict[str, Any]:
+    """Alias of cf_ingress_dump with a clearer get_* action name."""
+    return await cf_ingress_dump.__wrapped__(tunnel_id=tunnel_id)
 
 
 @mcp.tool()

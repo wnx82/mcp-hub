@@ -48,8 +48,8 @@
 
 ### Diagnostic sans mutation
 
-- [ ] Implementer `mcp-hub-rescue status` pour retourner l'etat systemd, le PID, l'uptime, la version, la derniere erreur, l'endpoint MCP et l'etat de la configuration
-- [ ] Implementer `mcp-hub-rescue health` pour verifier le service, le processus, l'endpoint, les imports essentiels, la configuration et l'espace disque
+- [x] Implementer `mcp-hub-rescue status` pour retourner l'etat systemd, le PID, l'uptime, la version, la derniere erreur, l'endpoint MCP et l'etat de la configuration
+- [x] Implementer `mcp-hub-rescue health` pour verifier le service, le processus, l'endpoint, les imports essentiels, la configuration et l'espace disque
 - [x] Implementer `mcp-hub-rescue logs` avec 50 lignes par defaut, une limite maximale stricte et une lecture bornee du journal
 - [x] Implementer `mcp-hub-rescue validate-config` sans importer MCP Hub, avec fichier, probleme et ligne lorsque le parseur isole est disponible
 - [x] Implementer un premier `mcp-hub-rescue diagnose` et `doctor` read-only pour analyser systemd, logs, Python, dependances et configuration
@@ -92,13 +92,13 @@
 
 ## Idees utiles reperees dans `bjeans/homelab-mcp`
 
-- [ ] Ajouter un `PROJECT_INSTRUCTIONS.example.md` prive pour aider l'utilisateur a decrire sa topologie, ses hosts et ses usages MCP dans les instructions de son assistant
-- [ ] Ajouter un script de verification securite lanceable localement avant publication, puis proposer un hook git pre-push optionnel
-- [ ] Ajouter une documentation "testing local" pour valider les tools MCP avant release ou PR
-- [ ] Etudier un packaging Docker officiel avec utilisateur non-root, healthcheck et variables d'environnement explicites
-- [ ] Ajouter des hints de comportement MCP sur les tools quand FastMCP le permet (`readOnlyHint`, `idempotentHint`, `destructiveHint`, etc.)
-- [ ] Standardiser progressivement les noms de tools pour rendre les retours plus predictibles (`list_*`, `get_*`, actions explicites)
-- [ ] Extraire peu a peu des helpers communs de gestion d'erreur et de config pendant le decoupage du monolithe
+- [x] Ajouter un `PROJECT_INSTRUCTIONS.example.md` prive pour aider l'utilisateur a decrire sa topologie, ses hosts et ses usages MCP dans les instructions de son assistant
+- [x] Ajouter un script de verification securite lanceable localement avant publication, puis proposer un hook git pre-push optionnel
+- [x] Ajouter une documentation "testing local" pour valider les tools MCP avant release ou PR
+- [x] Etudier un packaging Docker officiel avec utilisateur non-root, healthcheck et variables d'environnement explicites
+- [x] Ajouter des hints de comportement MCP sur les tools quand FastMCP le permet (`readOnlyHint`, `idempotentHint`, `destructiveHint`, etc.)
+- [x] Standardiser progressivement les noms de tools pour rendre les retours plus predictibles (`list_*`, `get_*`, actions explicites)
+- [x] Extraire peu a peu des helpers communs de gestion d'erreur et de config pendant le decoupage du monolithe
 
 ## Documentation
 

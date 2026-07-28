@@ -2,6 +2,7 @@
 .env
 *.env
 !.env.example
+PROJECT_INSTRUCTIONS.md
 auth-profiles.json
 !auth-profiles.example.json
 hosts.yaml

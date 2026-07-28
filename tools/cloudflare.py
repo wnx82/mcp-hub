@@ -9,6 +9,7 @@ register_domain(
     "cloudflare",
     {
         "cf_ingress_dump",
+        "get_cloudflare_tunnel_ingress",
         "cloudflare_api",
         "cloudflare_dns_create",
         "cloudflare_dns_delete",
@@ -17,6 +18,7 @@ register_domain(
         "cloudflare_tunnel_config_update",
         "cloudflare_tunnel_get",
         "cloudflare_tunnels_list",
+        "list_cloudflare_tunnels",
     },
 )
 

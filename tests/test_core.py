@@ -142,6 +142,12 @@ class CoreHelperTests(unittest.TestCase):
         self.assertEqual("list_hosts", result["tool"])
         self.assertEqual(24, len(result["request_id"]))
 
+    def test_standardized_alias_reports_its_public_tool_name(self) -> None:
+        result = asyncio.run(server.get_mcp_stats())
+        self.assertTrue(result["ok"])
+        self.assertEqual("get_mcp_stats", result["tool"])
+        self.assertIn("stats", result["data"])
+
     def test_audit_export_correlates_tool_calls(self) -> None:
         call = asyncio.run(server.list_hosts())
         exported = asyncio.run(server.audit_export(last_n=20))

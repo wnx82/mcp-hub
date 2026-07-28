@@ -14,10 +14,13 @@ register_domain(
         "batch_exec",
         "ssh_reset_control",
         "system_info",
+        "get_system_info",
         "read_file",
         "service_ctl",
         "journal_query",
         "apt_status",
+        "list_package_updates",
+        "get_journal_entries",
     },
 )
 
