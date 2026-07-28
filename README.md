@@ -44,7 +44,7 @@ your assistant at it.
 
 ## Features
 
-- **87 tools**, one endpoint, one config file.
+- **88 tools**, one endpoint, one config file.
 - **Config-driven.** Your network lives in `hosts.yaml` and `.env`. Nothing about
   your infrastructure is baked into the code.
 - **Multiplexed SSH.** Persistent control sockets, so fleet-wide commands take
@@ -197,7 +197,7 @@ correlation predictable.
 | **Notion** | `notion_search` `notion_get_page` `notion_create_page` `notion_update_page` `notion_archive_page` `notion_query_database` `notion_get_block_children` `notion_append_blocks` `notion_append_table_row` `notion_delete_block` `notion_reload_token` |
 | **Vault** | `vault_search` `vault_get_item` `vault_get_field` `vault_create_item` `vault_update_item` `vault_list_folders` |
 | **LM Studio** | `lmstudio_status` `lmstudio_load` `lmstudio_unload` |
-| **Jobs & introspection** | `job_run` `job_status` `job_list` `job_logs` `mcp_health` `mcp_stats` `plan_mutation` `confirm_mutation` |
+| **Jobs & introspection** | `job_run` `job_status` `job_list` `job_logs` `mcp_health` `mcp_stats` `audit_export` `plan_mutation` `confirm_mutation` |
 
 ## Security
 

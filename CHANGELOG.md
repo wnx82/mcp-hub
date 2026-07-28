@@ -38,6 +38,8 @@ Fixed / Security.
   one-time confirmation for exact mutating calls.
 - Every registered tool now publishes MCP `readOnlyHint`, `destructiveHint`,
   `idempotentHint`, and `openWorldHint` behavior annotations.
+- `audit_export` exposes a bounded 30-day audit trail correlated by request,
+  profile, tool, host, result status, and duration without storing full payloads.
 
 ### Changed
 

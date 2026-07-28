@@ -142,6 +142,17 @@ class CoreHelperTests(unittest.TestCase):
         self.assertEqual("list_hosts", result["tool"])
         self.assertEqual(24, len(result["request_id"]))
 
+    def test_audit_export_correlates_tool_calls(self) -> None:
+        call = asyncio.run(server.list_hosts())
+        exported = asyncio.run(server.audit_export(last_n=20))
+        entries = exported["data"]["entries"]
+        matching = [
+            entry for entry in entries if entry["request_id"] == call["request_id"]
+        ]
+        self.assertEqual(1, len(matching))
+        self.assertEqual("list_hosts", matching[0]["tool"])
+        self.assertTrue(matching[0]["ok"])
+
     def test_yaml_inventory_loaders(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

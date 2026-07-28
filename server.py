@@ -141,9 +141,24 @@ def _init_db() -> None:
     """)
     con.execute("CREATE INDEX IF NOT EXISTS idx_call_log_ts ON call_log(ts)")
     con.execute("CREATE INDEX IF NOT EXISTS idx_call_log_tool ON call_log(tool)")
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS tool_audit (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT NOT NULL,
+            request_id TEXT NOT NULL,
+            profile TEXT NOT NULL,
+            tool TEXT NOT NULL,
+            host TEXT,
+            ok INTEGER NOT NULL,
+            duration_ms INTEGER NOT NULL,
+            result_json TEXT NOT NULL
+        )
+    """)
+    con.execute("CREATE INDEX IF NOT EXISTS idx_tool_audit_request ON tool_audit(request_id)")
     # Cleanup: purge des entrees > 30 jours pour eviter la croissance illimitee
     cur = con.execute("DELETE FROM call_log WHERE ts < datetime('now', '-30 days')")
     purged = cur.rowcount
+    con.execute("DELETE FROM tool_audit WHERE ts < datetime('now', '-30 days')")
     con.commit()
     # VACUUM doit etre hors transaction
     con.isolation_level = None
@@ -484,6 +499,38 @@ def _response_envelope(
     }
 
 
+def _log_tool_audit(envelope: dict[str, Any]) -> None:
+    data = envelope["data"]
+    summary = {
+        "ok": envelope["ok"],
+        "error": envelope["error"],
+        "data_type": type(data).__name__,
+        "data_keys": sorted(data) if isinstance(data, dict) else [],
+    }
+    profile = _current_profile.get()
+    try:
+        con = sqlite3.connect(STATE_DB)
+        con.execute(
+            "INSERT INTO tool_audit "
+            "(ts, request_id, profile, tool, host, ok, duration_ms, result_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                datetime.now(timezone.utc).isoformat(),
+                envelope["request_id"],
+                str((profile or {}).get("name") or "internal"),
+                envelope["tool"],
+                envelope["host"],
+                int(envelope["ok"]),
+                envelope["duration_ms"],
+                json.dumps(summary, default=str),
+            ),
+        )
+        con.commit()
+        con.close()
+    except Exception as exc:
+        log.warning("tool_audit insert failed: %s", exc)
+
+
 def _guarded_tool(*d_args, **d_kwargs):
     def wrapper(fn):
         if fn.__name__ in config.MUTATING_TOOLS and fn.__name__ != "confirm_mutation":
@@ -523,9 +570,11 @@ def _guarded_tool(*d_args, **d_kwargs):
                         except Exception as exc:
                             log.exception("tool %s failed (request_id=%s)", fn.__name__, request_id)
                             result = {"error": str(exc)}
-                return _response_envelope(
+                envelope = _response_envelope(
                     fn.__name__, result, started, request_id, fn, args, kwargs
                 )
+                _log_tool_audit(envelope)
+                return envelope
             finally:
                 _current_request_id.reset(request_token)
 
@@ -864,6 +913,35 @@ def mcp_stats(last_n: int = 200) -> dict[str, Any]:
         "stats": [
             {"tool": r[0], "calls": r[1], "avg_ms": r[2], "max_ms": r[3], "errors": r[4]}
             for r in rows
+        ],
+    }
+
+
+@mcp.tool()
+def audit_export(last_n: int = 100) -> dict[str, Any]:
+    """Export a bounded JSON-ready audit trail without full tool payloads or secrets."""
+    last_n = max(1, min(last_n, 1_000))
+    con = sqlite3.connect(STATE_DB)
+    rows = con.execute(
+        "SELECT ts, request_id, profile, tool, host, ok, duration_ms, result_json "
+        "FROM tool_audit ORDER BY id DESC LIMIT ?",
+        (last_n,),
+    ).fetchall()
+    con.close()
+    return {
+        "retention_days": 30,
+        "entries": [
+            {
+                "timestamp": row[0],
+                "request_id": row[1],
+                "profile": row[2],
+                "tool": row[3],
+                "host": row[4],
+                "ok": bool(row[5]),
+                "duration_ms": row[6],
+                "result": json.loads(row[7]),
+            }
+            for row in rows
         ],
     }
 
