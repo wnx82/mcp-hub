@@ -44,7 +44,7 @@ fi
 # --- code --------------------------------------------------------------------
 log "installing code to $PREFIX"
 install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0750 "$PREFIX"
-for f in server.py config.py _version.py wake-host.py requirements.txt pyproject.toml README.md SECURITY.md LICENSE .env.example CHANGELOG.md CONTRIBUTING.md; do
+for f in server.py config.py _version.py wake-host.py requirements.txt pyproject.toml README.md SECURITY.md LICENSE .env.example auth-profiles.example.json CHANGELOG.md CONTRIBUTING.md; do
   [[ -f "$SRC/$f" ]] && install -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0640 "$SRC/$f" "$PREFIX/$f"
 done
 chmod 0750 "$PREFIX/server.py" "$PREFIX/wake-host.py"

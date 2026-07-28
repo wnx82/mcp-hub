@@ -48,6 +48,13 @@ Fixed / Security.
 - The contribution guide now defines how compatible dependency ranges and
   reproducible deployment pins must be maintained together.
 
+### Security
+
+- Optional bearer-token access profiles now provide `read`, `operate`, and
+  `admin` levels with tool, host, and tag restrictions. The legacy
+  `MCP_AUTH_TOKEN` remains an unrestricted admin token for compatibility, and
+  the global read-only switch still overrides every profile.
+
 ## [0.2.0] - 2026-07-28
 
 ### Added

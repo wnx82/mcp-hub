@@ -8,6 +8,7 @@ Precedence: process environment > `.env` next to this file > defaults.
 """
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any, Optional
@@ -84,6 +85,35 @@ if not SECRET_PATH.startswith("/"):
 
 # Bearer token checked on every request. This is the actual authentication.
 AUTH_TOKEN = env("MCP_AUTH_TOKEN")
+_AUTH_PROFILES_PATH = env("MCP_AUTH_PROFILES_FILE")
+AUTH_PROFILES_FILE = Path(_AUTH_PROFILES_PATH) if _AUTH_PROFILES_PATH else None
+
+
+def load_access_profiles() -> dict[str, dict[str, Any]]:
+    """Load token access profiles from a root-owned JSON file."""
+    if AUTH_PROFILES_FILE is None:
+        return {}
+    with AUTH_PROFILES_FILE.open(encoding="utf-8") as handle:
+        data = json.load(handle)
+    profiles = data.get("tokens", data)
+    if not isinstance(profiles, dict):
+        raise ValueError("MCP_AUTH_PROFILES_FILE must contain a token mapping")
+    allowed_levels = {"read", "operate", "admin"}
+    result = {}
+    for token, raw in profiles.items():
+        if not isinstance(token, str) or not token or not isinstance(raw, dict):
+            raise ValueError("each access profile must map a non-empty token to an object")
+        level = str(raw.get("level", "read")).lower()
+        if level not in allowed_levels:
+            raise ValueError(f"invalid access level for profile {raw.get('name', '<unnamed>')!r}")
+        result[token] = {
+            "name": str(raw.get("name") or "unnamed"),
+            "level": level,
+            "tools": [str(item) for item in raw.get("tools", ["*"])],
+            "hosts": [str(item) for item in raw.get("hosts", ["*"])],
+            "tags": [str(item) for item in raw.get("tags", [])],
+        }
+    return result
 
 # Public hostname the hub is reached on, used for DNS-rebinding protection.
 PUBLIC_HOST = env("MCP_PUBLIC_HOST")
@@ -124,6 +154,13 @@ MUTATING_TOOLS = frozenset({
     "vault_create_item", "vault_update_item",
     # lm studio
     "lmstudio_load", "lmstudio_unload",
+})
+
+DESTRUCTIVE_TOOLS = frozenset({
+    "cloudflare_dns_delete",
+    "destroy_resource",
+    "dsm_power",
+    "notion_delete_block",
 })
 
 # =============================================================================

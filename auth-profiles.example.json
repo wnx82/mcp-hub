@@ -1,0 +1,11 @@
+{
+  "tokens": {
+    "replace-with-a-random-token": {
+      "name": "observer",
+      "level": "read",
+      "tools": ["mcp_health", "list_*", "get_*", "*_status"],
+      "hosts": ["storage"],
+      "tags": ["monitoring"]
+    }
+  }
+}

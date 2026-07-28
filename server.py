@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import fnmatch
 import functools
 import hmac as _hmac
+import inspect
 import json
 import logging
 import os
@@ -55,6 +57,9 @@ MAX_STDERR_BYTES = config.MAX_STDERR_BYTES
 # --- Tracking du tool appelant (pour mcp_stats granulaire) ---
 _current_tool: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "current_tool", default=None
+)
+_current_profile: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "access_profile", default=None
 )
 
 
@@ -373,22 +378,92 @@ mcp = FastMCP(
 _register_tool = mcp.tool
 
 
+def _matches_any(value: str, patterns: list[str]) -> bool:
+    return any(fnmatch.fnmatchcase(value, pattern) for pattern in patterns)
+
+
+def _profile_allows_host(profile: dict[str, Any], host: str) -> bool:
+    if _matches_any(host, profile["hosts"]):
+        return True
+    allowed_tags = set(profile["tags"])
+    if not allowed_tags:
+        return False
+    info = _load_hosts().get(host, {})
+    return bool(allowed_tags.intersection(str(tag) for tag in info.get("tags", [])))
+
+
+def _access_refusal(profile, fn, args, kwargs) -> dict[str, Any] | None:
+    if profile is None:
+        return None
+    tool = fn.__name__
+    if not _matches_any(tool, profile["tools"]):
+        return {"error": "refused: tool is not allowed by access profile", "tool": tool}
+    level = profile["level"]
+    if level == "read" and tool in config.MUTATING_TOOLS:
+        return {"error": "refused: access profile is read-only", "tool": tool}
+    if level != "admin" and tool in config.DESTRUCTIVE_TOOLS:
+        return {"error": "refused: destructive tool requires admin access", "tool": tool}
+
+    bound = inspect.signature(fn).bind_partial(*args, **kwargs)
+    bound.apply_defaults()
+    requested_hosts: set[str] = set()
+    requested_tags: set[str] = set()
+    for key in ("host", "target"):
+        value = bound.arguments.get(key)
+        if isinstance(value, str) and value not in ("", "local"):
+            requested_hosts.add(value)
+    for value in bound.arguments.get("hosts") or []:
+        if isinstance(value, str):
+            requested_hosts.add(value)
+    for value in bound.arguments.get("tags") or []:
+        if isinstance(value, str):
+            requested_tags.add(value)
+    for operation in bound.arguments.get("operations") or []:
+        if not isinstance(operation, dict):
+            continue
+        target = operation.get("host") or operation.get("target")
+        if isinstance(target, str) and target not in ("", "local"):
+            requested_hosts.add(target)
+        tag = operation.get("tag")
+        if isinstance(tag, str):
+            requested_tags.add(tag)
+
+    denied_hosts = sorted(
+        host for host in requested_hosts if not _profile_allows_host(profile, host)
+    )
+    denied_tags = sorted(
+        tag for tag in requested_tags if not _matches_any(tag, profile["tags"])
+    )
+    if denied_hosts or denied_tags:
+        return {
+            "error": "refused: target is not allowed by access profile",
+            "tool": tool,
+            "denied_hosts": denied_hosts,
+            "denied_tags": denied_tags,
+        }
+    return None
+
+
 def _guarded_tool(*d_args, **d_kwargs):
     decorate = _register_tool(*d_args, **d_kwargs)
 
     def wrapper(fn):
-        if not config.READ_ONLY or fn.__name__ not in config.MUTATING_TOOLS:
-            return decorate(fn)
-
         @functools.wraps(fn)
-        async def refuse(*args, **kwargs):
-            return {
-                "error": "refused: MCP Hub is in read-only mode",
-                "tool": fn.__name__,
-                "hint": "set MCP_READ_ONLY=false in .env to enable mutating tools",
-            }
+        async def guarded(*args, **kwargs):
+            if config.READ_ONLY and fn.__name__ in config.MUTATING_TOOLS:
+                return {
+                    "error": "refused: MCP Hub is in read-only mode",
+                    "tool": fn.__name__,
+                    "hint": "set MCP_READ_ONLY=false in .env to enable mutating tools",
+                }
+            profile = _current_profile.get()
+            refusal = _access_refusal(profile, fn, args, kwargs)
+            if refusal:
+                return refusal
+            result = fn(*args, **kwargs)
+            return await result if inspect.isawaitable(result) else result
 
-        return decorate(refuse)
+        return decorate(guarded)
 
     return wrapper
 
@@ -3142,16 +3217,25 @@ class _BearerAuthMiddleware:
     comparison is constant-time so the token cannot be recovered by timing.
     """
 
-    def __init__(self, app, token: str) -> None:
+    def __init__(self, app, profiles: dict[str, dict[str, Any]]) -> None:
         self.app = app
-        self._expected = "Bearer " + token
+        self._profiles = profiles
 
     async def __call__(self, scope, receive, send):
         if scope.get("type") != "http":
             return await self.app(scope, receive, send)
         headers = dict(scope.get("headers") or [])
         provided = headers.get(b"authorization", b"").decode("latin-1")
-        if not _hmac.compare_digest(provided, self._expected):
+        token = provided[7:] if provided.startswith("Bearer ") else ""
+        profile = next(
+            (
+                candidate
+                for expected, candidate in self._profiles.items()
+                if _hmac.compare_digest(token, expected)
+            ),
+            None,
+        )
+        if profile is None:
             body = b'{"error": "unauthorized"}'
             await send({
                 "type": "http.response.start",
@@ -3164,7 +3248,11 @@ class _BearerAuthMiddleware:
             })
             await send({"type": "http.response.body", "body": body})
             return
-        await self.app(scope, receive, send)
+        context_token = _current_profile.set(profile)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            _current_profile.reset(context_token)
 
 
 def main() -> None:
@@ -3173,7 +3261,16 @@ def main() -> None:
         return
 
     log.info("mcp-hub %s starting", __version__)
-    if not config.AUTH_TOKEN:
+    profiles = config.load_access_profiles()
+    if config.AUTH_TOKEN:
+        profiles.setdefault(config.AUTH_TOKEN, {
+            "name": "legacy-admin",
+            "level": "admin",
+            "tools": ["*"],
+            "hosts": ["*"],
+            "tags": ["*"],
+        })
+    if not profiles:
         log.warning(
             "MCP_AUTH_TOKEN is empty - the endpoint is protected only by the "
             "secret URL path. See SECURITY.md."
@@ -3190,11 +3287,11 @@ def main() -> None:
 
     app = mcp.streamable_http_app()
     log.info(
-        "listening on http://%s:%d%s (bearer auth enabled)",
-        config.BIND_ADDR, config.PORT, SECRET_PATH,
+        "listening on http://%s:%d%s (bearer auth enabled, %d profile(s))",
+        config.BIND_ADDR, config.PORT, SECRET_PATH, len(profiles),
     )
     uvicorn.run(
-        _BearerAuthMiddleware(app, config.AUTH_TOKEN),
+        _BearerAuthMiddleware(app, profiles),
         host=config.BIND_ADDR,
         port=config.PORT,
         log_level="info",

@@ -19,7 +19,7 @@
 
 ## Securite, fiabilite et extensibilite
 
-- [ ] Ajouter des profils d'acces par token avec restrictions par tool, host ou tag et niveaux (`read`, `operate`, `admin`); aujourd'hui, un token donne acces a tout, comme documente dans [SECURITY.md](SECURITY.md)
+- [x] Ajouter des profils d'acces par token avec restrictions par tool, host ou tag et niveaux (`read`, `operate`, `admin`); aujourd'hui, un token donne acces a tout, comme documente dans [SECURITY.md](SECURITY.md)
 - [ ] Generaliser le mode planification et confirmation temporaire des actions mutatrices, sur le modele de `destroy_resource`, notamment pour Cloudflare, DSM, Notion, les services et les ecritures de fichiers
 - [ ] Ajouter les annotations MCP de comportement (`readOnlyHint`, `destructiveHint`, `idempotentHint`) afin que le client distingue les consultations des operations risquees
 - [ ] Uniformiser les reponses des tools avec une enveloppe commune (`ok`, `data`, `error`, `duration_ms`, `host`, `request_id`) pour fiabiliser les raisonnements et les enchainements automatiques

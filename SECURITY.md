@@ -33,7 +33,8 @@ unauthenticated root shell on your entire fleet**. Deploy it accordingly.
   page, an email, a log line, an issue title — and that content instructs it to
   run a command, the hub will run that command. Nothing in this project
   prevents that.
-- Anyone holding the bearer token. There is one trust level: full access.
+- A token explicitly configured with `level: admin`. Access profiles can reduce
+  a token's tools and target hosts, but they do not sandbox an allowed command.
 - Malicious operators. There is no multi-user model, no per-tool ACL, no audit
   trail you could defend in a post-mortem beyond `state.db` and the journal.
 - Host-to-host lateral movement. The hub's SSH key reaches every host.
@@ -61,6 +62,18 @@ Ordered roughly by how much it matters:
 7. **Scope your API tokens.** A Cloudflare token limited to one zone beats an
    account-wide token.
 8. **Read `journal_query` / `job_logs` occasionally.** Know what it did.
+
+## Access profiles
+
+Set `MCP_AUTH_PROFILES_FILE` to a root-owned JSON file based on
+`auth-profiles.example.json` to define multiple bearer tokens. Profiles support
+`read`, `operate`, and `admin` levels plus glob-style tool allowlists and
+host/tag restrictions. `read` cannot call mutating tools; `operate` cannot call
+destructive tools; `admin` can call every explicitly allowed tool.
+
+`MCP_READ_ONLY=true` remains the global kill switch and overrides every
+profile. The legacy `MCP_AUTH_TOKEN`, when configured, is treated as an
+unrestricted admin profile for backward compatibility.
 
 ## Reporting a vulnerability
 
