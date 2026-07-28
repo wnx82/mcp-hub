@@ -8,6 +8,7 @@ Precedence: process environment > `.env` next to this file > defaults.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -107,6 +108,7 @@ def load_access_profiles() -> dict[str, dict[str, Any]]:
         if level not in allowed_levels:
             raise ValueError(f"invalid access level for profile {raw.get('name', '<unnamed>')!r}")
         result[token] = {
+            "_identity": hashlib.sha256(token.encode()).hexdigest(),
             "name": str(raw.get("name") or "unnamed"),
             "level": level,
             "tools": [str(item) for item in raw.get("tools", ["*"])],
@@ -129,6 +131,10 @@ if PUBLIC_HOST:
 # =============================================================================
 # Global kill-switch: when true every mutating tool refuses to run.
 READ_ONLY = env_bool("MCP_READ_ONLY", True)
+CONFIRMATION_MODE = env("MCP_CONFIRMATION_MODE", "sensitive").lower()
+if CONFIRMATION_MODE not in {"off", "sensitive", "all"}:
+    CONFIRMATION_MODE = "sensitive"
+CONFIRMATION_TTL_SECONDS = env_int("MCP_CONFIRMATION_TTL_SECONDS", 300)
 
 # Tools blocked by READ_ONLY. Anything that executes code, changes state on a
 # host, or writes to a third-party API.
@@ -137,7 +143,7 @@ MUTATING_TOOLS = frozenset({
     "local_exec", "remote_exec", "fleet_exec", "batch_exec",
     "ct_exec", "ct_write_file", "proxmox_ct_exec", "docker_exec",
     "service_ctl", "job_run", "destroy_resource", "wake_host",
-    "ssh_reset_control",
+    "ssh_reset_control", "confirm_mutation",
     # cloudflare
     "cloudflare_api", "cloudflare_dns_create", "cloudflare_dns_delete",
     "cloudflare_tunnel_config_update",
@@ -161,6 +167,17 @@ DESTRUCTIVE_TOOLS = frozenset({
     "destroy_resource",
     "dsm_power",
     "notion_delete_block",
+})
+
+CONFIRMATION_TOOLS = frozenset({
+    "cloudflare_dns_delete",
+    "cloudflare_tunnel_config_update",
+    "ct_write_file",
+    "dsm_download_control",
+    "dsm_package_control",
+    "notion_archive_page",
+    "notion_delete_block",
+    "service_ctl",
 })
 
 # =============================================================================

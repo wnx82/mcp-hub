@@ -94,6 +94,42 @@ class CoreHelperTests(unittest.TestCase):
         refused = server._access_refusal(profile, remote_exec, (), {"host": "storage"})
         self.assertIn("read-only", refused["error"])
 
+    def test_sensitive_mutation_requires_one_time_confirmation(self) -> None:
+        calls = []
+
+        async def sample_mutation(value: str, api_token: str = "") -> dict:
+            calls.append(value)
+            return {"value": value}
+
+        with (
+            mock.patch.object(config, "READ_ONLY", False),
+            mock.patch.dict(server._mutating_functions, {"sample_mutation": sample_mutation}),
+        ):
+            plan = asyncio.run(
+                server.plan_mutation(
+                    "sample_mutation",
+                    {"value": "expected", "api_token": "must-not-leak"},
+                )
+            )
+            token = plan["confirmation_token"]
+            self.assertEqual("[REDACTED]", plan["arguments_preview"]["api_token"])
+            result = asyncio.run(server.confirm_mutation(token))
+            replay = asyncio.run(server.confirm_mutation(token))
+
+        self.assertEqual(["expected"], calls)
+        self.assertEqual("executed", result["status"])
+        self.assertIn("already used", replay["error"])
+
+    def test_direct_sensitive_mutation_is_refused_before_execution(self) -> None:
+        with (
+            mock.patch.object(config, "READ_ONLY", False),
+            mock.patch.object(config, "CONFIRMATION_MODE", "sensitive"),
+        ):
+            result = asyncio.run(
+                server.service_ctl("example", "restart", host=None)
+            )
+        self.assertIn("confirmation plan", result["error"])
+
     def test_yaml_inventory_loaders(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

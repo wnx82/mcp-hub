@@ -10,15 +10,18 @@ import asyncio
 import contextvars
 import fnmatch
 import functools
+import hashlib
 import hmac as _hmac
 import inspect
 import json
 import logging
 import os
 import re
+import secrets
 import socket
 import sqlite3
 import sys
+import time
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 from typing import Any, Literal, Optional
@@ -61,6 +64,11 @@ _current_tool: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 _current_profile: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
     "access_profile", default=None
 )
+_confirmed_mutation: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "confirmed_mutation", default=False
+)
+_mutating_functions: dict[str, Any] = {}
+_pending_mutations: dict[str, dict[str, Any]] = {}
 
 
 # --- Logging ---
@@ -448,6 +456,9 @@ def _guarded_tool(*d_args, **d_kwargs):
     decorate = _register_tool(*d_args, **d_kwargs)
 
     def wrapper(fn):
+        if fn.__name__ in config.MUTATING_TOOLS and fn.__name__ != "confirm_mutation":
+            _mutating_functions[fn.__name__] = fn
+
         @functools.wraps(fn)
         async def guarded(*args, **kwargs):
             if config.READ_ONLY and fn.__name__ in config.MUTATING_TOOLS:
@@ -460,6 +471,19 @@ def _guarded_tool(*d_args, **d_kwargs):
             refusal = _access_refusal(profile, fn, args, kwargs)
             if refusal:
                 return refusal
+            requires_confirmation = (
+                config.CONFIRMATION_MODE == "all"
+                or (
+                    config.CONFIRMATION_MODE == "sensitive"
+                    and fn.__name__ in config.CONFIRMATION_TOOLS
+                )
+            )
+            if requires_confirmation and not _confirmed_mutation.get():
+                return {
+                    "error": "refused: mutation requires a confirmation plan",
+                    "tool": fn.__name__,
+                    "hint": "call plan_mutation with this tool and its arguments, then confirm_mutation",
+                }
             result = fn(*args, **kwargs)
             return await result if inspect.isawaitable(result) else result
 
@@ -3207,6 +3231,98 @@ async def endpoints_health(
     }
 
 
+def _profile_identity(profile: dict[str, Any] | None) -> str:
+    if profile is None:
+        return "internal"
+    return str(profile.get("_identity") or profile.get("name") or "unnamed")
+
+
+def _purge_expired_mutations() -> None:
+    now = time.monotonic()
+    for token in [
+        token for token, plan in _pending_mutations.items()
+        if plan["expires_at"] <= now
+    ]:
+        _pending_mutations.pop(token, None)
+
+
+def _redacted_preview(value: Any, key: str = "") -> Any:
+    lowered = key.lower()
+    if any(marker in lowered for marker in ("token", "password", "secret", "api_key")):
+        return "[REDACTED]"
+    if isinstance(value, dict):
+        return {
+            str(child_key): _redacted_preview(child_value, str(child_key))
+            for child_key, child_value in value.items()
+        }
+    if isinstance(value, list):
+        return [_redacted_preview(item) for item in value]
+    if isinstance(value, str):
+        return redact_str(value)
+    return value
+
+
+@mcp.tool()
+def plan_mutation(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Create a short-lived, one-time confirmation plan for an exact mutating tool call."""
+    _purge_expired_mutations()
+    fn = _mutating_functions.get(tool)
+    if fn is None:
+        return {"error": "unknown or non-mutating tool", "tool": tool}
+    try:
+        bound = inspect.signature(fn).bind(**arguments)
+        bound.apply_defaults()
+    except TypeError as exc:
+        return {"error": f"invalid arguments: {exc}", "tool": tool}
+    profile = _current_profile.get()
+    refusal = _access_refusal(profile, fn, (), bound.arguments)
+    if refusal:
+        return refusal
+    token = secrets.token_urlsafe(24)
+    ttl = max(30, min(config.CONFIRMATION_TTL_SECONDS, 900))
+    _pending_mutations[token] = {
+        "tool": tool,
+        "arguments": dict(arguments),
+        "profile": _profile_identity(profile),
+        "expires_at": time.monotonic() + ttl,
+    }
+    return {
+        "status": "confirmation_required",
+        "tool": tool,
+        "arguments_preview": _redacted_preview(arguments),
+        "confirmation_token": token,
+        "expires_in_seconds": ttl,
+        "warning": "confirm_mutation will execute this exact call once",
+    }
+
+
+@mcp.tool()
+async def confirm_mutation(confirmation_token: str) -> dict[str, Any]:
+    """Execute one previously planned mutation and consume its confirmation token."""
+    _purge_expired_mutations()
+    plan = _pending_mutations.pop(confirmation_token, None)
+    if plan is None:
+        return {"error": "invalid, expired, or already used confirmation token"}
+    profile = _current_profile.get()
+    if plan["profile"] != _profile_identity(profile):
+        return {"error": "confirmation token belongs to a different access profile"}
+    if config.READ_ONLY:
+        return {"error": "refused: MCP Hub is in read-only mode"}
+    fn = _mutating_functions.get(plan["tool"])
+    if fn is None:
+        return {"error": "planned tool is no longer available", "tool": plan["tool"]}
+    refusal = _access_refusal(profile, fn, (), plan["arguments"])
+    if refusal:
+        return refusal
+    context_token = _confirmed_mutation.set(True)
+    try:
+        result = fn(**plan["arguments"])
+        result = await result if inspect.isawaitable(result) else result
+    finally:
+        _confirmed_mutation.reset(context_token)
+    return {"status": "executed", "tool": plan["tool"], "result": result}
+
+
 # ============================================================================
 # === Entry point ============================================================
 # ============================================================================
@@ -3264,6 +3380,7 @@ def main() -> None:
     profiles = config.load_access_profiles()
     if config.AUTH_TOKEN:
         profiles.setdefault(config.AUTH_TOKEN, {
+            "_identity": hashlib.sha256(config.AUTH_TOKEN.encode()).hexdigest(),
             "name": "legacy-admin",
             "level": "admin",
             "tools": ["*"],

@@ -34,6 +34,8 @@ Fixed / Security.
   and the advertised tool count.
 - CI now rejects tracked Python caches, build directories, wheels, source
   archives, and package metadata.
+- `plan_mutation` and `confirm_mutation` provide short-lived, profile-bound,
+  one-time confirmation for exact mutating calls.
 
 ### Changed
 

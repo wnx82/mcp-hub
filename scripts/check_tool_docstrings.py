@@ -15,7 +15,7 @@ import server
 
 FRENCH_MARKERS = re.compile(
     r"[àâçéèêëîïôùûüÿœ]|\b("
-    r"ajoute|avec|cree|dans|defaut|des|ecrit|etat|execute|hote|les|liste|"
+    r"ajoute|avec|cree|dans|defaut|des|ecrit|etat|hote|les|liste|"
     r"met|modele|parallele|recupere|renvoie|recherche|supprime|une|verifie"
     r")\b",
     re.IGNORECASE,
