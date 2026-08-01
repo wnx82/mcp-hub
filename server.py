@@ -104,6 +104,7 @@ DEFAULT_TIMEOUT = config.DEFAULT_TIMEOUT
 MAX_TIMEOUT = config.MAX_TIMEOUT
 MAX_STDOUT_BYTES = config.MAX_STDOUT_BYTES
 MAX_STDERR_BYTES = config.MAX_STDERR_BYTES
+TOPOLOGY_CACHE_TTL_SECONDS = 600
 
 
 # --- Tracking du tool appelant (pour mcp_stats granulaire) ---
@@ -3363,18 +3364,22 @@ _TOPO_OVERLAY = config.load_topology()
 @mcp.tool()
 async def topology(refresh: bool = False, live: bool = True) -> dict[str, Any]:
     """Return the canonical mapping of containers, addresses, roles, hosts, tunnels, and warnings."""
-    cached = None if refresh else _kv_get("topology", 600)
+    cached = None if refresh else _kv_get("topology", TOPOLOGY_CACHE_TTL_SECONDS)
     if cached and not refresh:
         cached["_cache"] = "hit"
+        cached["_cache_scope"] = "deployment"
+        cached["_cache_ttl_ms"] = TOPOLOGY_CACHE_TTL_SECONDS * 1000
         return cached
 
     result = {k: v for k, v in _TOPO_OVERLAY.items()}
     result["_generated"] = datetime.now(timezone.utc).isoformat()
     result["_cache"] = "miss"
+    result["_cache_scope"] = "deployment"
+    result["_cache_ttl_ms"] = TOPOLOGY_CACHE_TTL_SECONDS * 1000
 
     if live:
         listing = "pct list 2>/dev/null; echo '=== VM ==='; qm list 2>/dev/null"
-        for hv in _hypervisor_hosts():
+        for hv in sorted(_hypervisor_hosts()):
             try:
                 r = await _ssh_run(hv, listing, as_root=True, timeout=12)
                 if r.get("return_code") == 0:

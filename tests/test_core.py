@@ -248,6 +248,31 @@ class CoreHelperTests(unittest.TestCase):
         self.assertEqual("get_mcp_stats", result["tool"])
         self.assertIn("stats", result["data"])
 
+    def test_list_tools_is_stable_between_identical_calls(self) -> None:
+        first = asyncio.run(server.mcp.list_tools())
+        second = asyncio.run(server.mcp.list_tools())
+        self.assertEqual(
+            [tool.name for tool in first],
+            [tool.name for tool in second],
+        )
+
+    def test_topology_reports_explicit_cache_metadata(self) -> None:
+        with (
+            mock.patch.object(server, "_TOPO_OVERLAY", {"guests": {"100": "example"}}),
+            mock.patch.object(server, "_hypervisor_hosts", return_value=[]),
+            mock.patch.object(server, "_kv_get", side_effect=[None, {"guests": {"100": "example"}}]),
+            mock.patch.object(server, "_kv_set"),
+        ):
+            first = asyncio.run(server.topology(refresh=False, live=False))["data"]
+            second = asyncio.run(server.topology(refresh=False, live=False))["data"]
+
+        self.assertEqual("miss", first["_cache"])
+        self.assertEqual("deployment", first["_cache_scope"])
+        self.assertEqual(server.TOPOLOGY_CACHE_TTL_SECONDS * 1000, first["_cache_ttl_ms"])
+        self.assertEqual("hit", second["_cache"])
+        self.assertEqual("deployment", second["_cache_scope"])
+        self.assertEqual(server.TOPOLOGY_CACHE_TTL_SECONDS * 1000, second["_cache_ttl_ms"])
+
     def test_audit_export_correlates_tool_calls(self) -> None:
         call = asyncio.run(server.list_hosts())
         exported = asyncio.run(server.audit_export(last_n=20))
