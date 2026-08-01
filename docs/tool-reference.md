@@ -154,6 +154,6 @@ All tools return the common response envelope documented in the README.
 | `mcp_stats` | <code>mcp_stats(last_n: int = 200)</code> | Summarize recent tool calls, latency, return codes, and errors. |
 | `get_mcp_stats` | <code>get_mcp_stats(last_n: int = 200)</code> | Alias of mcp_stats with a predictable get_* naming convention. |
 | `audit_export` | <code>audit_export(last_n: int = 100)</code> | Export a bounded JSON-ready audit trail without full tool payloads or secrets. |
-| `plan_mutation` | <code>plan_mutation(tool: str, arguments: dict[str, Any])</code> | Create a short-lived, one-time opaque state handle for one exact mutation. |
+| `plan_mutation` | <code>plan_mutation(tool: str, arguments: dict[str, Any], ctx: MCPToolContext | None = None)</code> | Create a short-lived mutation confirmation plan or resolve it through MRTR. |
 | `confirm_mutation` | <code>confirm_mutation(confirmation_token: str)</code> | Execute one previously planned mutation from its opaque state handle. |
 | `rollback_change` | <code>rollback_change(change_id: str)</code> | Restore one ready mutation snapshot once, after normal mutation confirmation. |

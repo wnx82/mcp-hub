@@ -8,6 +8,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from core.limits import ResourceLimiter
@@ -206,6 +207,129 @@ class CoreHelperTests(unittest.TestCase):
 
         self.assertEqual(["persisted"], calls)
         self.assertEqual("executed", result["data"]["status"])
+
+    def test_plan_mutation_supports_mrtr_confirmation(self) -> None:
+        calls = []
+
+        async def sample_mutation(value: str) -> dict:
+            calls.append(value)
+            return {"value": value}
+
+        with (
+            mock.patch.object(config, "READ_ONLY", False),
+            mock.patch.dict(server._mutating_functions, {"sample_mutation": sample_mutation}),
+            mock.patch.object(
+                server,
+                "_resource_limiter",
+                ResourceLimiter(
+                    requests_per_minute=120,
+                    max_argument_bytes=200_000,
+                    max_concurrent_per_target=4,
+                    circuit_failures=3,
+                    circuit_reset_seconds=60,
+                    mutation_cooldown_seconds=0,
+                ),
+            ),
+        ):
+            first = asyncio.run(
+                server.plan_mutation.__wrapped__(
+                    "sample_mutation",
+                    {"value": "mrtr"},
+                    ctx=SimpleNamespace(request_state=None, input_responses=None),
+                )
+            )
+            self.assertEqual("input_required", first.result_type)
+            token = first.request_state
+            self.assertIn(server._MRTR_CONFIRMATION_KEY, first.input_requests)
+            second = asyncio.run(
+                server.plan_mutation.__wrapped__(
+                    "sample_mutation",
+                    {"value": "mrtr"},
+                    ctx=SimpleNamespace(
+                        request_state=token,
+                        input_responses={
+                            server._MRTR_CONFIRMATION_KEY: {
+                                "action": "accept",
+                                "content": {"confirm": True},
+                            }
+                        },
+                    ),
+                )
+            )
+
+        self.assertEqual(["mrtr"], calls)
+        self.assertEqual("executed", second["status"])
+
+    def test_plan_mutation_mrtr_rejects_invalid_confirmation_response(self) -> None:
+        async def sample_mutation(value: str) -> dict:
+            return {"value": value}
+
+        with (
+            mock.patch.object(config, "READ_ONLY", False),
+            mock.patch.dict(server._mutating_functions, {"sample_mutation": sample_mutation}),
+        ):
+            first = asyncio.run(
+                server.plan_mutation.__wrapped__(
+                    "sample_mutation",
+                    {"value": "invalid"},
+                    ctx=SimpleNamespace(request_state=None, input_responses=None),
+                )
+            )
+            result = asyncio.run(
+                server.plan_mutation.__wrapped__(
+                    "sample_mutation",
+                    {"value": "invalid"},
+                    ctx=SimpleNamespace(
+                        request_state=first.request_state,
+                        input_responses={
+                            server._MRTR_CONFIRMATION_KEY: {
+                                "action": "accept",
+                                "content": {"confirm": False},
+                            }
+                        },
+                    ),
+                )
+            )
+
+        self.assertIn("confirm=true", result["error"])
+
+    def test_plan_mutation_mrtr_handles_decline_without_executing(self) -> None:
+        calls = []
+
+        async def sample_mutation(value: str) -> dict:
+            calls.append(value)
+            return {"value": value}
+
+        with (
+            mock.patch.object(config, "READ_ONLY", False),
+            mock.patch.dict(server._mutating_functions, {"sample_mutation": sample_mutation}),
+        ):
+            first = asyncio.run(
+                server.plan_mutation.__wrapped__(
+                    "sample_mutation",
+                    {"value": "declined"},
+                    ctx=SimpleNamespace(request_state=None, input_responses=None),
+                )
+            )
+            result = asyncio.run(
+                server.plan_mutation.__wrapped__(
+                    "sample_mutation",
+                    {"value": "declined"},
+                    ctx=SimpleNamespace(
+                        request_state=first.request_state,
+                        input_responses={
+                            server._MRTR_CONFIRMATION_KEY: {
+                                "action": "decline",
+                            }
+                        },
+                    ),
+                )
+            )
+            replay = asyncio.run(server.confirm_mutation(first.request_state))
+
+        self.assertEqual([], calls)
+        self.assertEqual("cancelled", result["status"])
+        self.assertIn("already used", replay["error"])
 
     def test_plan_mutation_rejects_unknown_tool(self) -> None:
         result = asyncio.run(server.plan_mutation("definitely_unknown_tool", {}))

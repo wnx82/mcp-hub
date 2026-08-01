@@ -32,11 +32,15 @@ from mcp.types import ToolAnnotations
 
 try:
     from mcp.server.mcpserver import MCPServer as _MCPServer
+    from mcp.server.mcpserver.context import Context as MCPToolContext
+    from mcp.types import InputRequiredResult
 
     _MCP_SDK_V2 = True
 except ImportError:
     from mcp.server.fastmcp import FastMCP as _MCPServer
 
+    MCPToolContext = Any
+    InputRequiredResult = None
     _MCP_SDK_V2 = False
 
 import config
@@ -135,6 +139,8 @@ _resource_limiter = ResourceLimiter(
     circuit_reset_seconds=config.CIRCUIT_RESET_SECONDS,
     mutation_cooldown_seconds=config.MUTATION_COOLDOWN_SECONDS,
 )
+
+_MRTR_CONFIRMATION_KEY = "confirm"
 
 
 # --- Logging ---
@@ -3923,6 +3929,111 @@ def _redacted_preview(value: Any, key: str = "") -> Any:
     return value
 
 
+def _supports_mrtr(ctx: MCPToolContext | None) -> bool:
+    return bool(_MCP_SDK_V2 and ctx is not None and InputRequiredResult is not None)
+
+
+def _pending_mutation_matches(
+    token: str,
+    tool: str,
+    arguments: dict[str, Any],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    _purge_expired_pending_operations()
+    pending = _pending_store.get(token)
+    if pending is None or pending["kind"] != "mutation_plan":
+        return None, {"error": "invalid, expired, or already used confirmation token"}
+    profile = _current_profile.get()
+    if pending["profile"] != _profile_identity(profile):
+        return None, {"error": "confirmation token belongs to a different access profile"}
+    payload = pending["payload"]
+    if payload["tool"] != tool or payload["arguments"] != dict(arguments):
+        return None, {"error": "request_state does not match this planned mutation"}
+    return pending, None
+
+
+def _extract_input_response_payload(response: Any) -> dict[str, Any] | None:
+    if response is None:
+        return None
+    payload = getattr(response, "root", response)
+    if isinstance(payload, dict) and "root" in payload and isinstance(payload["root"], dict):
+        payload = payload["root"]
+    return payload if isinstance(payload, dict) else None
+
+
+def _build_mutation_confirmation_input_required(
+    tool: str,
+    arguments: dict[str, Any],
+    token: str,
+    ttl: int,
+) -> InputRequiredResult:
+    preview = _redacted_preview(arguments)
+    return InputRequiredResult(
+        input_requests={
+            _MRTR_CONFIRMATION_KEY: {
+                "method": "elicitation/create",
+                "params": {
+                    "message": (
+                        f"Confirme l'execution de l'outil sensible '{tool}'. "
+                        f"Arguments: {json.dumps(preview, ensure_ascii=True, sort_keys=True)}. "
+                        f"Ce plan expire dans {ttl} secondes."
+                    ),
+                    "mode": "form",
+                    "requestedSchema": {
+                        "type": "object",
+                        "properties": {
+                            "confirm": {
+                                "type": "boolean",
+                                "description": "Mettre true pour executer cette mutation.",
+                            }
+                        },
+                        "required": ["confirm"],
+                    },
+                },
+            }
+        },
+        request_state=token,
+    )
+
+
+async def _execute_planned_mutation(confirmation_token: str) -> dict[str, Any]:
+    pending = _pending_store.get(confirmation_token)
+    if pending is None or pending["kind"] != "mutation_plan":
+        return {"error": "invalid, expired, or already used confirmation token"}
+    plan = pending["payload"]
+    profile = _current_profile.get()
+    if pending["profile"] != _profile_identity(profile):
+        return {"error": "confirmation token belongs to a different access profile"}
+    if config.READ_ONLY:
+        return {"error": "refused: MCP Hub is in read-only mode"}
+    fn = _mutating_functions.get(plan["tool"])
+    if fn is None:
+        return {"error": "planned tool is no longer available", "tool": plan["tool"]}
+    refusal = _access_refusal(profile, fn, (), plan["arguments"])
+    if refusal:
+        return refusal
+    lease, limit_error = _resource_limiter.acquire(
+        identity=_limit_identity(profile),
+        arguments={"kwargs": plan["arguments"]},
+        targets=_request_targets(fn, (), plan["arguments"]),
+        mutating=True,
+    )
+    if limit_error is not None:
+        return {"error": limit_error, "tool": plan["tool"]}
+    _pending_store.pop(confirmation_token)
+    context_token = _confirmed_mutation.set(True)
+    try:
+        result = fn(**plan["arguments"])
+        result = await result if inspect.isawaitable(result) else result
+        succeeded = not (isinstance(result, dict) and result.get("error") is not None)
+        _resource_limiter.release(lease, succeeded=succeeded)
+        lease = None
+    finally:
+        if lease is not None:
+            _resource_limiter.release(lease, succeeded=False)
+        _confirmed_mutation.reset(context_token)
+    return {"status": "executed", "tool": plan["tool"], "result": result}
+
+
 async def _apply_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     state = snapshot["state"]
     tool = snapshot["tool"]
@@ -4007,9 +4118,12 @@ async def rollback_change(change_id: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-def plan_mutation(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Create a short-lived, one-time opaque state handle for one exact mutation."""
-    _purge_expired_pending_operations()
+async def plan_mutation(
+    tool: str,
+    arguments: dict[str, Any],
+    ctx: MCPToolContext | None = None,
+) -> dict[str, Any] | InputRequiredResult:
+    """Create a short-lived mutation confirmation plan or resolve it through MRTR."""
     fn = _mutating_functions.get(tool)
     if fn is None:
         return {"error": "unknown or non-mutating tool", "tool": tool}
@@ -4022,6 +4136,25 @@ def plan_mutation(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
     refusal = _access_refusal(profile, fn, (), bound.arguments)
     if refusal:
         return refusal
+    if _supports_mrtr(ctx) and ctx.request_state:
+        _, pending_error = _pending_mutation_matches(ctx.request_state, tool, arguments)
+        if pending_error:
+            return pending_error
+        responses = ctx.input_responses or {}
+        response = _extract_input_response_payload(responses.get(_MRTR_CONFIRMATION_KEY))
+        if response is None:
+            return {"error": "missing inputResponses for MRTR confirmation"}
+        action = response.get("action")
+        if action in {"decline", "cancel"}:
+            _pending_store.pop(ctx.request_state)
+            return {"status": "cancelled", "tool": tool, "reason": action}
+        if action != "accept":
+            return {"error": "unsupported elicitation response", "tool": tool}
+        content = response.get("content")
+        if not isinstance(content, dict) or content.get("confirm") is not True:
+            return {"error": "confirmation response must set confirm=true", "tool": tool}
+        return await _execute_planned_mutation(ctx.request_state)
+    _purge_expired_pending_operations()
     ttl = max(30, min(config.CONFIRMATION_TTL_SECONDS, 900))
     token, ttl = _pending_store.create(
         kind="mutation_plan",
@@ -4032,6 +4165,8 @@ def plan_mutation(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
         },
         ttl_seconds=ttl,
     )
+    if _supports_mrtr(ctx):
+        return _build_mutation_confirmation_input_required(tool, arguments, token, ttl)
     return {
         "status": "confirmation_required",
         "tool": tool,
@@ -4047,42 +4182,7 @@ def plan_mutation(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
 async def confirm_mutation(confirmation_token: str) -> dict[str, Any]:
     """Execute one previously planned mutation from its opaque state handle."""
     _purge_expired_pending_operations()
-    pending = _pending_store.get(confirmation_token)
-    if pending is None or pending["kind"] != "mutation_plan":
-        return {"error": "invalid, expired, or already used confirmation token"}
-    plan = pending["payload"]
-    profile = _current_profile.get()
-    if pending["profile"] != _profile_identity(profile):
-        return {"error": "confirmation token belongs to a different access profile"}
-    if config.READ_ONLY:
-        return {"error": "refused: MCP Hub is in read-only mode"}
-    fn = _mutating_functions.get(plan["tool"])
-    if fn is None:
-        return {"error": "planned tool is no longer available", "tool": plan["tool"]}
-    refusal = _access_refusal(profile, fn, (), plan["arguments"])
-    if refusal:
-        return refusal
-    lease, limit_error = _resource_limiter.acquire(
-        identity=_limit_identity(profile),
-        arguments={"kwargs": plan["arguments"]},
-        targets=_request_targets(fn, (), plan["arguments"]),
-        mutating=True,
-    )
-    if limit_error is not None:
-        return {"error": limit_error, "tool": plan["tool"]}
-    _pending_store.pop(confirmation_token)
-    context_token = _confirmed_mutation.set(True)
-    try:
-        result = fn(**plan["arguments"])
-        result = await result if inspect.isawaitable(result) else result
-        succeeded = not (isinstance(result, dict) and result.get("error") is not None)
-        _resource_limiter.release(lease, succeeded=succeeded)
-        lease = None
-    finally:
-        if lease is not None:
-            _resource_limiter.release(lease, succeeded=False)
-        _confirmed_mutation.reset(context_token)
-    return {"status": "executed", "tool": plan["tool"], "result": result}
+    return await _execute_planned_mutation(confirmation_token)
 
 
 # ============================================================================
