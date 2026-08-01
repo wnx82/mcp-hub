@@ -4,6 +4,7 @@ import asyncio
 import importlib.util
 import json
 import os
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -44,6 +45,39 @@ class CoreHelperTests(unittest.TestCase):
         )
         self.assertIn("read-only", str(result))
         self.assertIn("local_exec", str(result))
+
+    def test_http_bearer_auth_middleware_rejects_unauthorized_request(self) -> None:
+        messages = []
+
+        async def app(scope, receive, send):
+            messages.append(("app_called", scope["type"]))
+
+        middleware = server._BearerAuthMiddleware(app, {"expected-token": {"name": "admin"}})
+
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(message):
+            messages.append(message)
+
+        asyncio.run(
+            middleware(
+                {
+                    "type": "http",
+                    "method": "POST",
+                    "path": "/mcp",
+                    "client": ("127.0.0.1", 12345),
+                    "headers": [],
+                },
+                receive,
+                send,
+            )
+        )
+
+        self.assertNotIn(("app_called", "http"), messages)
+        self.assertEqual("http.response.start", messages[0]["type"])
+        self.assertEqual(401, messages[0]["status"])
+        self.assertIn((b"www-authenticate", b'Bearer realm="mcp-hub"'), messages[0]["headers"])
 
     def test_typed_environment_helpers(self) -> None:
         with mock.patch.dict(
@@ -173,6 +207,37 @@ class CoreHelperTests(unittest.TestCase):
         self.assertEqual(["persisted"], calls)
         self.assertEqual("executed", result["data"]["status"])
 
+    def test_plan_mutation_rejects_unknown_tool(self) -> None:
+        result = asyncio.run(server.plan_mutation("definitely_unknown_tool", {}))
+        self.assertIn("unknown or non-mutating tool", result["error"])
+
+    def test_plan_mutation_rejects_invalid_arguments(self) -> None:
+        async def sample_mutation(value: str) -> dict:
+            return {"value": value}
+
+        with mock.patch.dict(server._mutating_functions, {"sample_mutation": sample_mutation}):
+            result = asyncio.run(server.plan_mutation("sample_mutation", {}))
+        self.assertIn("invalid arguments", result["error"])
+
+    def test_confirm_mutation_rejects_expired_state_handle(self) -> None:
+        async def sample_mutation(value: str) -> dict:
+            return {"value": value}
+
+        with (
+            mock.patch.object(config, "READ_ONLY", False),
+            mock.patch.dict(server._mutating_functions, {"sample_mutation": sample_mutation}),
+        ):
+            plan = asyncio.run(server.plan_mutation("sample_mutation", {"value": "late"}))
+            token = plan["data"]["confirmation_token"]
+            with sqlite3.connect(server.STATE_DB) as connection:
+                connection.execute(
+                    "UPDATE pending_operation SET expires_at = ? WHERE token = ?",
+                    ("2000-01-01T00:00:00+00:00", token),
+                )
+            result = asyncio.run(server.confirm_mutation(token))
+
+        self.assertIn("invalid, expired, or already used", result["error"])
+
     def test_destroy_resource_returns_state_handle_alias(self) -> None:
         with (
             mock.patch.object(config, "READ_ONLY", False),
@@ -182,11 +247,24 @@ class CoreHelperTests(unittest.TestCase):
                 mock.AsyncMock(return_value={"return_code": 0, "stdout": "config", "stderr": ""}),
             ),
         ):
-            result = asyncio.run(server.destroy_resource("ct", "101", host="prox"))
+            result = asyncio.run(server.destroy_resource.__wrapped__("ct", "101", host="prox"))
         self.assertEqual(
-            result["data"]["state_handle"],
-            result["data"]["confirm_token"],
+            result["state_handle"],
+            result["confirm_token"],
         )
+
+    def test_destroy_resource_rejects_mismatched_handles(self) -> None:
+        with mock.patch.object(config, "READ_ONLY", False):
+            result = asyncio.run(
+                server.destroy_resource(
+                    "ct",
+                    "101",
+                    host="prox",
+                    confirm_token="one",
+                    state_handle="two",
+                )
+            )
+        self.assertIn("must match", result["error"])
 
     def test_direct_sensitive_mutation_is_refused_before_execution(self) -> None:
         with (
