@@ -54,7 +54,7 @@ and keep your real `PROJECT_INSTRUCTIONS.md` untracked.
 
 1. Put protocol logic and pure helpers in the matching `tools/<domain>.py`
    module, register ownership through `tools/registry.py`, and keep only the
-   FastMCP adapter in `server.py`. The tool docstring is the model-facing
+   MCP server adapter in `server.py`. The tool docstring is the model-facing
    documentation, so say what it does and what it will refuse to do.
    Prefer predictable public names such as `list_*` for bounded collection
    reads, `get_*` for one snapshot or object fetch, and explicit verbs for

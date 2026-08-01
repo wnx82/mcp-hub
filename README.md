@@ -9,7 +9,7 @@
 [![Release](https://img.shields.io/github/v/release/wnx82/mcp-hub?sort=semver)](https://github.com/wnx82/mcp-hub/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
-[![MCP](https://img.shields.io/badge/MCP-1.28-purple.svg)](https://modelcontextprotocol.io/)
+[![MCP](https://img.shields.io/badge/MCP-2.0-purple.svg)](https://modelcontextprotocol.io/)
 [![CI](https://github.com/wnx82/mcp-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/wnx82/mcp-hub/actions/workflows/ci.yml)
 
 MCP Hub is a single [Model Context Protocol](https://modelcontextprotocol.io/)
@@ -165,7 +165,7 @@ To wire the security readiness check into Git automatically on push:
 
 ## Architecture
 
-`server.py` remains the FastMCP composition root while domain code is moving
+`server.py` remains the MCP server composition root while domain code is moving
 incrementally into `tools/`. SSH command construction, Cloudflare paths and
 response extraction, DSM protocol metadata, inventory, and playbook builders
 are already isolated. `tools/registry.py` assigns extracted tools to a domain;

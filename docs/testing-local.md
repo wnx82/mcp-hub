@@ -34,7 +34,7 @@ python3 scripts/check_security_readiness.py
 
 ## Tool registration smoke test
 
-This verifies that the server imports and that FastMCP sees the registered
+This verifies that the server imports and that the MCP server sees the registered
 tools without needing a real homelab:
 
 ```bash

@@ -14,4 +14,4 @@ Versioning follows SemVer (https://semver.org). Pre-1.0, the minor number is
 where breaking changes land.
 """
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
