@@ -27,9 +27,17 @@ from logging.handlers import RotatingFileHandler
 from typing import Any, Literal, Optional
 
 import httpx
-from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
+
+try:
+    from mcp.server.mcpserver import MCPServer as _MCPServer
+
+    _MCP_SDK_V2 = True
+except ImportError:
+    from mcp.server.fastmcp import FastMCP as _MCPServer
+
+    _MCP_SDK_V2 = False
 
 import config
 from _version import __version__
@@ -378,33 +386,53 @@ async def _with_tool(name: str, coro):
         _current_tool.reset(token)
 
 
-# --- FastMCP setup ---
+# --- MCP server setup ---
 _init_db()
 _snapshot_store = SnapshotStore(
     STATE_DB,
     retention_days=config.SNAPSHOT_RETENTION_DAYS,
 )
 
-mcp = FastMCP(
-    name="mcp-hub",
-    instructions=(
-        "Central infrastructure control hub. Runs shell commands on the hub "
-        "itself and on every host declared in hosts.yaml, over a multiplexed "
-        "SSH pool. Optional integrations: Cloudflare (tunnels, ingress, DNS), "
-        "Proxmox, Docker, Synology DSM, n8n, Notion, Bitwarden/Vaultwarden. "
-        "Use as_root=True for sudo NOPASSWD."
-    ),
-    host=config.BIND_ADDR,
-    port=config.PORT,
-    stateless_http=True,
-    json_response=False,
-    streamable_http_path=SECRET_PATH,
-    transport_security=TransportSecuritySettings(
+_MCP_INSTRUCTIONS = (
+    "Central infrastructure control hub. Runs shell commands on the hub "
+    "itself and on every host declared in hosts.yaml, over a multiplexed "
+    "SSH pool. Optional integrations: Cloudflare (tunnels, ingress, DNS), "
+    "Proxmox, Docker, Synology DSM, n8n, Notion, Bitwarden/Vaultwarden. "
+    "Use as_root=True for sudo NOPASSWD."
+)
+
+
+def _transport_security_settings() -> TransportSecuritySettings:
+    return TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
         allowed_hosts=config.ALLOWED_HOSTS,
         allowed_origins=config.ALLOWED_ORIGINS,
-    ),
-)
+    )
+
+
+def _streamable_http_kwargs() -> dict[str, Any]:
+    return {
+        "host": config.BIND_ADDR,
+        "port": config.PORT,
+        "stateless_http": True,
+        "json_response": False,
+        "streamable_http_path": SECRET_PATH,
+        "transport_security": _transport_security_settings(),
+    }
+
+
+if _MCP_SDK_V2:
+    mcp = _MCPServer(
+        name="mcp-hub",
+        instructions=_MCP_INSTRUCTIONS,
+        version=__version__,
+    )
+else:
+    mcp = _MCPServer(
+        name="mcp-hub",
+        instructions=_MCP_INSTRUCTIONS,
+        **_streamable_http_kwargs(),
+    )
 
 
 # --- Global read-only guard -------------------------------------------------
@@ -653,10 +681,9 @@ def _guarded_tool(*d_args, **d_kwargs):
 
 mcp.tool = _guarded_tool
 
-# FastMCP has no `version` parameter, but the low-level server it wraps does,
-# and that is what clients see as serverInfo.version during `initialize`.
-# Left unset it reports the mcp library's own version, which is misleading.
-mcp._mcp_server.version = __version__
+# v1 reports the SDK version unless we override the wrapped low-level server.
+if not _MCP_SDK_V2:
+    mcp._mcp_server.version = __version__
 
 if config.READ_ONLY:
     log.warning(
@@ -4076,12 +4103,14 @@ def main() -> None:
                 "Binding %s with no auth token: anyone who can reach this port "
                 "gets root on your fleet.", config.BIND_ADDR,
             )
-        mcp.run(transport="streamable-http")
+        run_kwargs = _streamable_http_kwargs() if _MCP_SDK_V2 else {}
+        mcp.run(transport="streamable-http", **run_kwargs)
         return
 
     import uvicorn
 
-    app = mcp.streamable_http_app()
+    app_kwargs = _streamable_http_kwargs() if _MCP_SDK_V2 else {}
+    app = mcp.streamable_http_app(**app_kwargs)
     log.info(
         "listening on http://%s:%d%s (bearer auth enabled, %d profile(s))",
         config.BIND_ADDR, config.PORT, SECRET_PATH, len(profiles),
