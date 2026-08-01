@@ -46,6 +46,22 @@ print('first five:', ', '.join(tool.name for tool in tools[:5]))
 "
 ```
 
+## stdio smoke test
+
+This validates the local stdio transport explicitly instead of only inferring
+it from HTTP behavior:
+
+```bash
+python server.py --transport stdio
+```
+
+Expected result:
+
+- the process starts without opening an HTTP port;
+- an MCP client that speaks stdio can complete discovery against it;
+- stopping the process does not touch `state.db` except for normal audit/cache
+  activity.
+
 ## Manual read-only server run
 
 Use the tracked examples or your own untracked local config:

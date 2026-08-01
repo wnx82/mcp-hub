@@ -80,6 +80,140 @@ class CoreHelperTests(unittest.TestCase):
         self.assertEqual(401, messages[0]["status"])
         self.assertIn((b"www-authenticate", b'Bearer realm="mcp-hub"'), messages[0]["headers"])
 
+    def test_http_mcp_request_validation_rejects_unknown_protocol_version(self) -> None:
+        error = server._validate_http_mcp_request(
+            {
+                "mcp-protocol-version": "2099-01-01",
+            },
+            b'{"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"list_hosts"}}',
+        )
+        self.assertIn("unsupported MCP protocol version", error)
+
+    def test_http_mcp_request_validation_rejects_mismatched_tool_name(self) -> None:
+        error = server._validate_http_mcp_request(
+            {
+                "mcp-method": "tools/call",
+                "mcp-name": "list_hosts",
+            },
+            b'{"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"topology"}}',
+        )
+        self.assertIn("Mcp-Name header does not match request body", error)
+
+    def test_http_mcp_request_validation_accepts_matching_tool_name(self) -> None:
+        error = server._validate_http_mcp_request(
+            {
+                "mcp-protocol-version": "2026-07-28",
+                "mcp-method": "tools/call",
+                "mcp-name": "list_hosts",
+            },
+            b'{"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"list_hosts"}}',
+        )
+        self.assertIsNone(error)
+
+    def test_http_mcp_request_validation_accepts_legacy_protocol_version(self) -> None:
+        error = server._validate_http_mcp_request(
+            {
+                "mcp-protocol-version": "2025-11-25",
+                "mcp-method": "tools/call",
+                "mcp-name": "list_hosts",
+            },
+            b'{"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"list_hosts"}}',
+        )
+        self.assertIsNone(error)
+
+    def test_http_mcp_request_validation_accepts_missing_mcp_headers(self) -> None:
+        error = server._validate_http_mcp_request(
+            {},
+            b'{"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"list_hosts"}}',
+        )
+        self.assertIsNone(error)
+
+    def test_http_bearer_auth_middleware_rejects_unknown_protocol_version(self) -> None:
+        messages = []
+
+        async def app(scope, receive, send):
+            messages.append(("app_called", scope["type"]))
+
+        middleware = server._BearerAuthMiddleware(app, {"expected-token": {"name": "admin"}})
+
+        async def receive():
+            return {
+                "type": "http.request",
+                "body": (
+                    b'{"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"list_hosts"}}'
+                ),
+                "more_body": False,
+            }
+
+        async def send(message):
+            messages.append(message)
+
+        asyncio.run(
+            middleware(
+                {
+                    "type": "http",
+                    "method": "POST",
+                    "path": "/mcp",
+                    "client": ("127.0.0.1", 12345),
+                    "headers": [
+                        (b"authorization", b"Bearer expected-token"),
+                        (b"mcp-protocol-version", b"2099-01-01"),
+                        (b"mcp-method", b"tools/call"),
+                        (b"mcp-name", b"list_hosts"),
+                    ],
+                },
+                receive,
+                send,
+            )
+        )
+
+        self.assertNotIn(("app_called", "http"), messages)
+        self.assertEqual("http.response.start", messages[0]["type"])
+        self.assertEqual(400, messages[0]["status"])
+
+    def test_http_bearer_auth_middleware_rejects_mismatched_mcp_name(self) -> None:
+        messages = []
+
+        async def app(scope, receive, send):
+            messages.append(("app_called", scope["type"]))
+
+        middleware = server._BearerAuthMiddleware(app, {"expected-token": {"name": "admin"}})
+
+        async def receive():
+            return {
+                "type": "http.request",
+                "body": (
+                    b'{"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"topology"}}'
+                ),
+                "more_body": False,
+            }
+
+        async def send(message):
+            messages.append(message)
+
+        asyncio.run(
+            middleware(
+                {
+                    "type": "http",
+                    "method": "POST",
+                    "path": "/mcp",
+                    "client": ("127.0.0.1", 12345),
+                    "headers": [
+                        (b"authorization", b"Bearer expected-token"),
+                        (b"mcp-protocol-version", b"2026-07-28"),
+                        (b"mcp-method", b"tools/call"),
+                        (b"mcp-name", b"list_hosts"),
+                    ],
+                },
+                receive,
+                send,
+            )
+        )
+
+        self.assertNotIn(("app_called", "http"), messages)
+        self.assertEqual("http.response.start", messages[0]["type"])
+        self.assertEqual(400, messages[0]["status"])
+
     def test_typed_environment_helpers(self) -> None:
         with mock.patch.dict(
             os.environ,
@@ -89,6 +223,25 @@ class CoreHelperTests(unittest.TestCase):
             self.assertTrue(config.env_bool("TEST_BOOL"))
             self.assertEqual(42, config.env_int("TEST_INT", 1))
             self.assertEqual(7, config.env_int("TEST_BAD_INT", 7))
+
+    def test_transport_selection_honors_cli_override(self) -> None:
+        with mock.patch.object(config, "TRANSPORT", "streamable-http"):
+            self.assertEqual("stdio", server._selected_transport(["--transport", "stdio"]))
+            self.assertEqual(
+                "streamable-http",
+                server._selected_transport(["--transport=streamable-http"]),
+            )
+
+    def test_main_can_start_stdio_transport(self) -> None:
+        with (
+            mock.patch.object(server, "sys") as sys_module,
+            mock.patch.object(server.mcp, "run") as run_mock,
+            mock.patch.object(server.config, "TRANSPORT", "streamable-http"),
+        ):
+            sys_module.argv = ["server.py", "--transport", "stdio"]
+            server.main()
+
+        run_mock.assert_called_once_with(transport="stdio")
 
     def test_access_profile_loading_and_target_restrictions(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

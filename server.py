@@ -141,6 +141,13 @@ _resource_limiter = ResourceLimiter(
 )
 
 _MRTR_CONFIRMATION_KEY = "confirm"
+_SUPPORTED_PROTOCOL_VERSIONS = {
+    "2024-11-05",
+    "2025-03-26",
+    "2025-06-18",
+    "2025-11-25",
+    "2026-07-28",
+}
 
 
 # --- Logging ---
@@ -460,6 +467,52 @@ def _http_request_log_fields(scope: dict[str, Any]) -> dict[str, str]:
         "mcp_name": headers.get("mcp-name", ""),
         "origin": headers.get("origin", ""),
     }
+
+
+def _json_error_bytes(message: str) -> bytes:
+    return json.dumps({"error": message}, ensure_ascii=True).encode("utf-8")
+
+
+def _extract_mcp_request_name(method: str, payload: dict[str, Any]) -> str | None:
+    if payload.get("method") != method:
+        return None
+    params = payload.get("params")
+    if not isinstance(params, dict):
+        return None
+    if method in {"tools/call", "prompts/get"}:
+        name = params.get("name")
+        return name if isinstance(name, str) else None
+    if method == "resources/read":
+        uri = params.get("uri")
+        return uri if isinstance(uri, str) else None
+    return None
+
+
+def _validate_http_mcp_request(headers: dict[str, str], body: bytes) -> str | None:
+    protocol_version = headers.get("mcp-protocol-version")
+    if protocol_version and protocol_version not in _SUPPORTED_PROTOCOL_VERSIONS:
+        return f"unsupported MCP protocol version: {protocol_version}"
+
+    advertised_method = headers.get("mcp-method")
+    advertised_name = headers.get("mcp-name")
+    if not advertised_method and not advertised_name:
+        return None
+    if not body:
+        return None
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    body_method = payload.get("method")
+    if advertised_method and isinstance(body_method, str) and body_method != advertised_method:
+        return f"Mcp-Method header does not match request body: {advertised_method} != {body_method}"
+    if advertised_name and advertised_method:
+        body_name = _extract_mcp_request_name(advertised_method, payload)
+        if body_name is not None and body_name != advertised_name:
+            return f"Mcp-Name header does not match request body: {advertised_name} != {body_name}"
+    return None
 
 
 if _MCP_SDK_V2:
@@ -4199,11 +4252,51 @@ class _BearerAuthMiddleware:
         self.app = app
         self._profiles = profiles
 
+    async def _read_body(self, receive) -> bytes:
+        chunks: list[bytes] = []
+        more_body = True
+        while more_body:
+            message = await receive()
+            if message["type"] != "http.request":
+                continue
+            chunks.append(message.get("body", b""))
+            more_body = bool(message.get("more_body"))
+        return b"".join(chunks)
+
+    async def _send_json_error(self, send, status: int, message: str) -> None:
+        body = _json_error_bytes(message)
+        await send({
+            "type": "http.response.start",
+            "status": status,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode()),
+            ],
+        })
+        await send({"type": "http.response.body", "body": body})
+
     async def __call__(self, scope, receive, send):
         if scope.get("type") != "http":
             return await self.app(scope, receive, send)
         fields = _http_request_log_fields(scope)
         headers = _scope_headers(scope)
+        body = await self._read_body(receive)
+        validation_error = _validate_http_mcp_request(headers, body)
+        if validation_error is not None:
+            log.info(
+                "http request rejected method=%s path=%s client=%s profile=invalid "
+                "mcp_protocol=%s mcp_method=%s mcp_name=%s origin=%s reason=%s",
+                fields["http_method"],
+                fields["path"],
+                fields["client"],
+                fields["mcp_protocol_version"] or "-",
+                fields["mcp_method"] or "-",
+                fields["mcp_name"] or "-",
+                fields["origin"] or "-",
+                validation_error,
+            )
+            await self._send_json_error(send, 400, validation_error)
+            return
         provided = headers.get("authorization", "")
         token = provided[7:] if provided.startswith("Bearer ") else ""
         profile = next(
@@ -4226,7 +4319,7 @@ class _BearerAuthMiddleware:
                 fields["mcp_name"] or "-",
                 fields["origin"] or "-",
             )
-            body = b'{"error": "unauthorized"}'
+            body = _json_error_bytes("unauthorized")
             await send({
                 "type": "http.response.start",
                 "status": 401,
@@ -4254,11 +4347,34 @@ class _BearerAuthMiddleware:
                 fields["mcp_name"] or "-",
                 fields["origin"] or "-",
             )
-            await self.app(scope, receive, send)
+            sent = False
+
+            async def replay_receive():
+                nonlocal sent
+                if sent:
+                    return {"type": "http.request", "body": b"", "more_body": False}
+                sent = True
+                return {"type": "http.request", "body": body, "more_body": False}
+
+            await self.app(scope, replay_receive, send)
         finally:
             _current_http_mcp_name.reset(name_token)
             _current_http_mcp_method.reset(method_token)
             _current_profile.reset(context_token)
+
+
+def _selected_transport(argv: list[str] | None = None) -> str:
+    args = list(sys.argv[1:] if argv is None else argv)
+    for index, value in enumerate(args):
+        if value == "--transport" and index + 1 < len(args):
+            candidate = args[index + 1].strip().lower()
+            if candidate in {"streamable-http", "stdio"}:
+                return candidate
+        if value.startswith("--transport="):
+            candidate = value.split("=", 1)[1].strip().lower()
+            if candidate in {"streamable-http", "stdio"}:
+                return candidate
+    return config.TRANSPORT
 
 
 def main() -> None:
@@ -4267,6 +4383,11 @@ def main() -> None:
         return
 
     log.info("mcp-hub %s starting", __version__)
+    transport = _selected_transport()
+    if transport == "stdio":
+        log.info("starting MCP Hub on stdio transport")
+        mcp.run(transport="stdio")
+        return
     profiles = config.load_access_profiles()
     if config.AUTH_TOKEN:
         profiles.setdefault(config.AUTH_TOKEN, {

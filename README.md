@@ -103,6 +103,15 @@ The server then listens on `http://127.0.0.1:8000<MCP_SECRET_PATH>`, with
 `Authorization: Bearer <MCP_AUTH_TOKEN>`. Requests without the token get a 401;
 requests to any other path get a 404.
 
+For a local MCP client that wants `stdio` instead of HTTP, start the same hub
+with:
+
+```bash
+mcp-hub --transport stdio
+```
+
+or set `MCP_TRANSPORT=stdio` in the environment before launch.
+
 For a systemd deployment, `sudo ./deploy/install.sh` creates a dedicated
 `mcphub` user and SSH key, generates both secrets into `/etc/default/mcp-hub`,
 and installs the unit. It is idempotent and never overwrites existing config.
@@ -147,6 +156,10 @@ be recommended.
 For a contributor-focused checklist covering lint, unit tests, tool
 registration, generated docs, installer smoke tests, and a manual read-only
 run, see **[docs/testing-local.md](docs/testing-local.md)**.
+
+For the MCP `2026-07-28` migration summary, compatibility matrix, and rollback
+procedure, see
+**[docs/migration/mcp-2026-07-28-guide.md](docs/migration/mcp-2026-07-28-guide.md)**.
 
 Before opening a PR or publishing a branch, you can also run the local release
 readiness checks:

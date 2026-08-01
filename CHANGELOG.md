@@ -20,6 +20,21 @@ Fixed / Security.
 
 ## [Unreleased]
 
+### Added
+
+- A dedicated MCP `2026-07-28` migration guide now documents the current
+  compatibility matrix, transport posture, and rollback procedure under
+  `docs/migration/mcp-2026-07-28-guide.md`.
+- Local validation now includes an explicit `stdio` startup path through
+  `mcp-hub --transport stdio` / `MCP_TRANSPORT=stdio`.
+
+### Changed
+
+- Streamable HTTP requests now reject unknown MCP protocol versions and
+  `Mcp-Name` header mismatches before the request reaches the MCP app.
+- The tracked environment reference, example environment file, README, and
+  local testing guide now document transport selection and the migration guide.
+
 ## [0.4.0] - 2026-08-01
 
 ### Added

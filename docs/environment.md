@@ -17,6 +17,7 @@ invalid integer values fall back to the documented default.
 | `MCP_ENDPOINTS_FILE` | `$MCP_HUB_HOME/endpoints.yaml` | no | HTTP probe inventory path. |
 | `MCP_STATE_DB` | `$MCP_HUB_HOME/state.db` | sensitive | SQLite audit, jobs, cache, and rollback snapshots. |
 | `MCP_LOG_FILE` | `$MCP_HUB_HOME/mcp-hub.log` | sensitive | Rotating application log path. |
+| `MCP_TRANSPORT` | `streamable-http` | no | MCP transport to start by default: `streamable-http` or `stdio`. |
 | `MCP_BIND_ADDR` | `127.0.0.1` | no | HTTP listen address. Keep loopback unless protected by a proxy or tunnel. |
 | `MCP_PORT` | `8000` | no | HTTP listen port. |
 | `MCP_SECRET_PATH` | `/mcp` | sensitive | Streamable HTTP endpoint path; obscurity, not authentication. |
