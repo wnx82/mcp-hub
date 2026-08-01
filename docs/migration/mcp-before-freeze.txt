@@ -1,0 +1,33 @@
+Migration baseline captured on 2026-08-01T11:50:41Z
+
+Git
+- branch: main
+- commit: 7e01c08
+- status: working tree not clean
+- note: docs/roadmap2026-07-28.md is untracked
+
+Python
+- system: Python 3.12.3
+- venv executable: .venv/bin/python
+
+Project version
+- mcp-hub: 0.3.0
+
+Runtime dependencies seen from .venv
+- mcp==1.28.1
+- httpx==0.28.1
+- PyYAML==6.0.3
+- uvicorn==0.51.0
+
+Command results
+- python3 -m pip show mcp: FAILED (package not installed in system interpreter)
+- .venv/bin/python -m pip show mcp: FAILED (.venv lacks pip module)
+- python3 -m unittest: NO TESTS RAN
+- .venv/bin/python -m unittest discover -s tests -q: OK (55 tests)
+- .venv/bin/python -m pytest -q: FAILED (.venv lacks pytest module)
+- .venv/bin/python -c "import asyncio, server; ...": OK (103 tools registered)
+- .venv/bin/python server.py --version: OK (mcp-hub 0.3.0)
+
+Current migration blockers before branch creation
+- baseline is being prepared while still on main
+- branch creation should wait until the intended roadmap/doc changes are committed or consciously moved
