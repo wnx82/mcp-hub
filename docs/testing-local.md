@@ -67,6 +67,10 @@ Expected result:
 - `401` when the path is correct but no bearer token is provided.
 - `404` when the path is wrong.
 
+For the HTTP transport details introduced by MCP `2026-07-28`, including the
+headers that proxies must preserve, see
+**[docs/http-transport-2026-07-28.md](docs/http-transport-2026-07-28.md)**.
+
 ## Installer smoke test
 
 The systemd installer has a dedicated local smoke test that stages files in a

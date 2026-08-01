@@ -191,6 +191,29 @@ class CoreHelperTests(unittest.TestCase):
         self.assertEqual("list_hosts", result["tool"])
         self.assertEqual(24, len(result["request_id"]))
 
+    def test_http_request_log_fields_extract_mcp_headers(self) -> None:
+        fields = server._http_request_log_fields(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": "/mcp",
+                "client": ("127.0.0.1", 12345),
+                "headers": [
+                    (b"mcp-protocol-version", b"2026-07-28"),
+                    (b"mcp-method", b"tools/call"),
+                    (b"mcp-name", b"list_hosts"),
+                    (b"origin", b"https://example.test"),
+                ],
+            }
+        )
+        self.assertEqual("POST", fields["http_method"])
+        self.assertEqual("/mcp", fields["path"])
+        self.assertEqual("127.0.0.1", fields["client"])
+        self.assertEqual("2026-07-28", fields["mcp_protocol_version"])
+        self.assertEqual("tools/call", fields["mcp_method"])
+        self.assertEqual("list_hosts", fields["mcp_name"])
+        self.assertEqual("https://example.test", fields["origin"])
+
     def test_standardized_alias_reports_its_public_tool_name(self) -> None:
         result = asyncio.run(server.get_mcp_stats())
         self.assertTrue(result["ok"])

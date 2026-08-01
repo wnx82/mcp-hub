@@ -425,6 +425,30 @@ def _streamable_http_kwargs() -> dict[str, Any]:
     }
 
 
+def _scope_headers(scope: dict[str, Any]) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    for key, value in scope.get("headers") or []:
+        try:
+            headers[key.decode("latin-1").lower()] = value.decode("latin-1")
+        except Exception:
+            continue
+    return headers
+
+
+def _http_request_log_fields(scope: dict[str, Any]) -> dict[str, str]:
+    headers = _scope_headers(scope)
+    client = scope.get("client") or ("", 0)
+    return {
+        "http_method": str(scope.get("method") or ""),
+        "path": str(scope.get("path") or ""),
+        "client": str(client[0] or ""),
+        "mcp_protocol_version": headers.get("mcp-protocol-version", ""),
+        "mcp_method": headers.get("mcp-method", ""),
+        "mcp_name": headers.get("mcp-name", ""),
+        "origin": headers.get("origin", ""),
+    }
+
+
 if _MCP_SDK_V2:
     mcp = _MCPServer(
         name="mcp-hub",
@@ -4050,8 +4074,9 @@ class _BearerAuthMiddleware:
     async def __call__(self, scope, receive, send):
         if scope.get("type") != "http":
             return await self.app(scope, receive, send)
-        headers = dict(scope.get("headers") or [])
-        provided = headers.get(b"authorization", b"").decode("latin-1")
+        fields = _http_request_log_fields(scope)
+        headers = _scope_headers(scope)
+        provided = headers.get("authorization", "")
         token = provided[7:] if provided.startswith("Bearer ") else ""
         profile = next(
             (
@@ -4062,6 +4087,17 @@ class _BearerAuthMiddleware:
             None,
         )
         if profile is None:
+            log.info(
+                "http request method=%s path=%s client=%s profile=unauthorized "
+                "mcp_protocol=%s mcp_method=%s mcp_name=%s origin=%s",
+                fields["http_method"],
+                fields["path"],
+                fields["client"],
+                fields["mcp_protocol_version"] or "-",
+                fields["mcp_method"] or "-",
+                fields["mcp_name"] or "-",
+                fields["origin"] or "-",
+            )
             body = b'{"error": "unauthorized"}'
             await send({
                 "type": "http.response.start",
@@ -4076,6 +4112,18 @@ class _BearerAuthMiddleware:
             return
         context_token = _current_profile.set(profile)
         try:
+            log.info(
+                "http request method=%s path=%s client=%s profile=%s "
+                "mcp_protocol=%s mcp_method=%s mcp_name=%s origin=%s",
+                fields["http_method"],
+                fields["path"],
+                fields["client"],
+                str(profile.get("name") or "unnamed"),
+                fields["mcp_protocol_version"] or "-",
+                fields["mcp_method"] or "-",
+                fields["mcp_name"] or "-",
+                fields["origin"] or "-",
+            )
             await self.app(scope, receive, send)
         finally:
             _current_profile.reset(context_token)
