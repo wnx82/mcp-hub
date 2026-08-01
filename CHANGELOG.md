@@ -20,6 +20,8 @@ Fixed / Security.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-01
+
 ### Added
 
 - A dedicated MCP `2026-07-28` migration guide now documents the current
