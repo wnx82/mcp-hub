@@ -231,6 +231,17 @@ class CoreHelperTests(unittest.TestCase):
         self.assertEqual("list_hosts", fields["mcp_name"])
         self.assertEqual("https://example.test", fields["origin"])
 
+    def test_limit_identity_includes_http_mcp_headers(self) -> None:
+        profile = {"_identity": "token-hash"}
+        method_token = server._current_http_mcp_method.set("tools/call")
+        name_token = server._current_http_mcp_name.set("list_hosts")
+        try:
+            identity = server._limit_identity(profile)
+        finally:
+            server._current_http_mcp_name.reset(name_token)
+            server._current_http_mcp_method.reset(method_token)
+        self.assertEqual("token-hash|tools/call|list_hosts", identity)
+
     def test_standardized_alias_reports_its_public_tool_name(self) -> None:
         result = asyncio.run(server.get_mcp_stats())
         self.assertTrue(result["ok"])

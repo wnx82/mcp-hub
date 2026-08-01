@@ -119,6 +119,12 @@ _confirmed_mutation: contextvars.ContextVar[bool] = contextvars.ContextVar(
 _current_request_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "request_id", default=None
 )
+_current_http_mcp_method: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "http_mcp_method", default=None
+)
+_current_http_mcp_name: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "http_mcp_name", default=None
+)
 _mutating_functions: dict[str, Any] = {}
 _resource_limiter = ResourceLimiter(
     requests_per_minute=config.RATE_LIMIT_PER_MINUTE,
@@ -562,7 +568,12 @@ def _request_targets(fn, args, kwargs) -> set[str]:
 
 
 def _limit_identity(profile: dict[str, Any] | None) -> str:
-    return str((profile or {}).get("_identity") or (profile or {}).get("name") or "internal")
+    base = str((profile or {}).get("_identity") or (profile or {}).get("name") or "internal")
+    mcp_method = _current_http_mcp_method.get()
+    mcp_name = _current_http_mcp_name.get()
+    if not mcp_method:
+        return base
+    return f"{base}|{mcp_method}|{mcp_name or '-'}"
 
 
 def _response_envelope(
@@ -599,6 +610,8 @@ def _log_tool_audit(envelope: dict[str, Any]) -> None:
         "ok": envelope["ok"],
         "error": envelope["error"],
         "domain": domain_for_tool(envelope["tool"]),
+        "mcp_method": _current_http_mcp_method.get(),
+        "mcp_name": _current_http_mcp_name.get(),
         "data_type": type(data).__name__,
         "data_keys": sorted(data) if isinstance(data, dict) else [],
     }
@@ -4121,6 +4134,8 @@ class _BearerAuthMiddleware:
             await send({"type": "http.response.body", "body": body})
             return
         context_token = _current_profile.set(profile)
+        method_token = _current_http_mcp_method.set(fields["mcp_method"] or None)
+        name_token = _current_http_mcp_name.set(fields["mcp_name"] or None)
         try:
             log.info(
                 "http request method=%s path=%s client=%s profile=%s "
@@ -4136,6 +4151,8 @@ class _BearerAuthMiddleware:
             )
             await self.app(scope, receive, send)
         finally:
+            _current_http_mcp_name.reset(name_token)
+            _current_http_mcp_method.reset(method_token)
             _current_profile.reset(context_token)
 
 
