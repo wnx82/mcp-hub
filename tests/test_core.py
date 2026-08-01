@@ -129,6 +129,7 @@ class CoreHelperTests(unittest.TestCase):
             self.assertEqual(
                 "[REDACTED]", plan["data"]["arguments_preview"]["api_token"]
             )
+            self.assertEqual(token, plan["data"]["state_handle"])
             result = asyncio.run(server.confirm_mutation(token))
             replay = asyncio.run(server.confirm_mutation(token))
 
@@ -161,6 +162,7 @@ class CoreHelperTests(unittest.TestCase):
         ):
             plan = asyncio.run(server.plan_mutation("sample_mutation", {"value": "persisted"}))
             token = plan["data"]["confirmation_token"]
+            self.assertEqual(token, plan["data"]["state_handle"])
             original_store = server._pending_store
             try:
                 server._pending_store = server.PendingOperationStore(server.STATE_DB)
@@ -170,6 +172,21 @@ class CoreHelperTests(unittest.TestCase):
 
         self.assertEqual(["persisted"], calls)
         self.assertEqual("executed", result["data"]["status"])
+
+    def test_destroy_resource_returns_state_handle_alias(self) -> None:
+        with (
+            mock.patch.object(config, "READ_ONLY", False),
+            mock.patch.object(
+                server,
+                "_ssh_run",
+                mock.AsyncMock(return_value={"return_code": 0, "stdout": "config", "stderr": ""}),
+            ),
+        ):
+            result = asyncio.run(server.destroy_resource("ct", "101", host="prox"))
+        self.assertEqual(
+            result["data"]["state_handle"],
+            result["data"]["confirm_token"],
+        )
 
     def test_direct_sensitive_mutation_is_refused_before_execution(self) -> None:
         with (

@@ -29,7 +29,7 @@ All tools return the common response envelope documented in the README.
 | `dhcp_reservations` | <code>dhcp_reservations(only_online: bool = False)</code> | Return router DHCP reservations correlated with the configured inventory. |
 | `endpoints_health` | <code>endpoints_health(targets: Optional[list] = None, include_intermittent: bool = False, timeout_seconds: int = 6)</code> | Probe configured HTTP service endpoints from the hub without following redirects. |
 | `infra_snapshot` | <code>infra_snapshot(skip_unreachable: bool = True)</code> | Collect a read-only, concurrent overview of the configured infrastructure. |
-| `destroy_resource` | <code>destroy_resource(kind: str, ident: str, host: str = DEFAULT_HOST, confirm_token: Optional[str] = None, purge: bool = False)</code> | Destroy a Proxmox VM or container through a guarded two-step flow. The first call returns a short-lived confirmation token; the second applies the exact plan. |
+| `destroy_resource` | <code>destroy_resource(kind: str, ident: str, host: str = DEFAULT_HOST, confirm_token: Optional[str] = None, state_handle: Optional[str] = None, purge: bool = False)</code> | Destroy a Proxmox VM or container through a guarded two-step flow. |
 
 ## Proxmox & containers
 
@@ -154,6 +154,6 @@ All tools return the common response envelope documented in the README.
 | `mcp_stats` | <code>mcp_stats(last_n: int = 200)</code> | Summarize recent tool calls, latency, return codes, and errors. |
 | `get_mcp_stats` | <code>get_mcp_stats(last_n: int = 200)</code> | Alias of mcp_stats with a predictable get_* naming convention. |
 | `audit_export` | <code>audit_export(last_n: int = 100)</code> | Export a bounded JSON-ready audit trail without full tool payloads or secrets. |
-| `plan_mutation` | <code>plan_mutation(tool: str, arguments: dict[str, Any])</code> | Create a short-lived, one-time confirmation plan for an exact mutating tool call. |
-| `confirm_mutation` | <code>confirm_mutation(confirmation_token: str)</code> | Execute one previously planned mutation and consume its confirmation token. |
+| `plan_mutation` | <code>plan_mutation(tool: str, arguments: dict[str, Any])</code> | Create a short-lived, one-time opaque state handle for one exact mutation. |
+| `confirm_mutation` | <code>confirm_mutation(confirmation_token: str)</code> | Execute one previously planned mutation from its opaque state handle. |
 | `rollback_change` | <code>rollback_change(change_id: str)</code> | Restore one ready mutation snapshot once, after normal mutation confirmation. |

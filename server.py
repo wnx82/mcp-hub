@@ -3390,9 +3390,14 @@ async def destroy_resource(
     ident: str,
     host: str = DEFAULT_HOST,
     confirm_token: Optional[str] = None,
+    state_handle: Optional[str] = None,
     purge: bool = False,
 ) -> dict[str, Any]:
-    """Destroy a Proxmox VM or container through a guarded two-step flow. The first call returns a short-lived confirmation token; the second applies the exact plan."""
+    """Destroy a Proxmox VM or container through a guarded two-step flow.
+
+    The first call returns an opaque short-lived state handle. `confirm_token`
+    is kept as a backward-compatible alias for older clients.
+    """
     kind = kind.lower()
     if kind not in ("ct", "vm"):
         return {"error": "kind doit etre 'ct' ou 'vm'"}
@@ -3400,19 +3405,22 @@ async def destroy_resource(
         vmid = int(ident)
     except Exception:
         return {"error": "ident doit etre un VMID numerique"}
+    if confirm_token and state_handle and confirm_token != state_handle:
+        return {"error": "confirm_token and state_handle must match when both are provided"}
+    confirmation_handle = state_handle or confirm_token
 
     # --- Etape 2 : confirmation ---
-    if confirm_token:
+    if confirmation_handle:
         _purge_expired_pending_operations()
-        pending = _pending_store.get(confirm_token)
+        pending = _pending_store.get(confirmation_handle)
         pend = None if pending is None or pending["kind"] != "destroy_resource" else pending["payload"]
         if not pend:
-            return {"error": "token inconnu ou expire ; relance sans token pour en obtenir un neuf"}
+            return {"error": "state handle inconnu ou expire ; relance sans handle pour en obtenir un neuf"}
         if (pend["kind"], pend["vmid"], pend["host"]) != (kind, vmid, host):
-            return {"error": "le token ne correspond pas a cette cible"}
+            return {"error": "le state handle ne correspond pas a cette cible"}
         verb = "pct" if kind == "ct" else "qm"
         cmd = "%s destroy %d%s" % (verb, vmid, " --purge" if pend["purge"] else "")
-        _pending_store.pop(confirm_token)
+        _pending_store.pop(confirmation_handle)
         res = await _with_tool("destroy_resource", _ssh_run(host, cmd, as_root=True, timeout=120))
         return {"executed": cmd, "host": host, "result": res}
 
@@ -3440,8 +3448,9 @@ async def destroy_resource(
         "action": "CONFIRMATION REQUISE - rien detruit",
         "target": {"kind": kind, "vmid": vmid, "host": host, "purge": purge},
         "resolved": info.get("stdout", ""),
+        "state_handle": token,
         "confirm_token": token,
-        "how_to_confirm": "rappelle destroy_resource(kind='%s', ident='%d', host='%s', confirm_token='%s')"
+        "how_to_confirm": "rappelle destroy_resource(kind='%s', ident='%d', host='%s', state_handle='%s')"
                           % (kind, vmid, host, token),
         "expires_in_seconds": ttl,
     }
@@ -3981,7 +3990,7 @@ async def rollback_change(change_id: str) -> dict[str, Any]:
 
 @mcp.tool()
 def plan_mutation(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Create a short-lived, one-time confirmation plan for an exact mutating tool call."""
+    """Create a short-lived, one-time opaque state handle for one exact mutation."""
     _purge_expired_pending_operations()
     fn = _mutating_functions.get(tool)
     if fn is None:
@@ -4009,6 +4018,7 @@ def plan_mutation(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
         "status": "confirmation_required",
         "tool": tool,
         "arguments_preview": _redacted_preview(arguments),
+        "state_handle": token,
         "confirmation_token": token,
         "expires_in_seconds": ttl,
         "warning": "confirm_mutation will execute this exact call once",
@@ -4017,7 +4027,7 @@ def plan_mutation(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
 
 @mcp.tool()
 async def confirm_mutation(confirmation_token: str) -> dict[str, Any]:
-    """Execute one previously planned mutation and consume its confirmation token."""
+    """Execute one previously planned mutation from its opaque state handle."""
     _purge_expired_pending_operations()
     pending = _pending_store.get(confirmation_token)
     if pending is None or pending["kind"] != "mutation_plan":
