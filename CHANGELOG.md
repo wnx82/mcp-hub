@@ -20,6 +20,27 @@ Fixed / Security.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-01
+
+### Added
+
+- Migration audit notes now document the MCP SDK baseline, transport topology,
+  session-state inventory, and the v1-to-v2 upgrade path under `docs/migration/`.
+- A dedicated `docs/roadmap2026-07-28.md` tracks the MCP `2026-07-28`
+  migration as a stepwise, commit-oriented checklist.
+
+### Changed
+
+- MCP Hub now targets `mcp` Python SDK `2.0.0`, the first stable SDK release
+  supporting the MCP `2026-07-28` specification.
+- The server bootstrap now supports the SDK v2 `MCPServer` API and passes
+  streamable HTTP transport settings at `run()` / `streamable_http_app()`
+  time instead of constructor time.
+- Package metadata and pinned deployment requirements now track the `mcp>=2,<3`
+  support range and `mcp==2.0.0` tested deployment pin.
+- Current documentation now reflects the MCP v2 baseline instead of the older
+  FastMCP / MCP 1.28 wording.
+
 ## [0.3.0] - 2026-07-28
 
 ### Added
@@ -193,7 +214,8 @@ config-driven so it can run against any fleet.
 - There is one trust level. Anyone holding the bearer token has full access;
   there is no per-tool ACL and no multi-user model.
 
-[Unreleased]: https://github.com/wnx82/mcp-hub/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/wnx82/mcp-hub/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/wnx82/mcp-hub/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/wnx82/mcp-hub/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/wnx82/mcp-hub/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/wnx82/mcp-hub/releases/tag/v0.1.0

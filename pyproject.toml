@@ -23,7 +23,7 @@ classifiers = [
     "Topic :: System :: Systems Administration",
 ]
 dependencies = [
-    "mcp>=1.28,<2",
+    "mcp>=2,<3",
     "httpx>=0.28,<0.29",
     "PyYAML>=6.0,<7",
     "uvicorn>=0.51,<0.52",
