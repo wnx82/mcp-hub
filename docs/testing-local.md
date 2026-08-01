@@ -46,6 +46,22 @@ print('first five:', ', '.join(tool.name for tool in tools[:5]))
 "
 ```
 
+## stdio smoke test
+
+This validates the local stdio transport explicitly instead of only inferring
+it from HTTP behavior:
+
+```bash
+python server.py --transport stdio
+```
+
+Expected result:
+
+- the process starts without opening an HTTP port;
+- an MCP client that speaks stdio can complete discovery against it;
+- stopping the process does not touch `state.db` except for normal audit/cache
+  activity.
+
 ## Manual read-only server run
 
 Use the tracked examples or your own untracked local config:
@@ -66,6 +82,10 @@ Expected result:
 
 - `401` when the path is correct but no bearer token is provided.
 - `404` when the path is wrong.
+
+For the HTTP transport details introduced by MCP `2026-07-28`, including the
+headers that proxies must preserve, see
+**[docs/http-transport-2026-07-28.md](docs/http-transport-2026-07-28.md)**.
 
 ## Installer smoke test
 

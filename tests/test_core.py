@@ -4,10 +4,14 @@ import asyncio
 import importlib.util
 import json
 import os
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
+
+from core.limits import ResourceLimiter
 
 HUB_DEPENDENCIES_AVAILABLE = all(
     importlib.util.find_spec(name) is not None for name in ("mcp", "httpx", "yaml")
@@ -43,6 +47,173 @@ class CoreHelperTests(unittest.TestCase):
         self.assertIn("read-only", str(result))
         self.assertIn("local_exec", str(result))
 
+    def test_http_bearer_auth_middleware_rejects_unauthorized_request(self) -> None:
+        messages = []
+
+        async def app(scope, receive, send):
+            messages.append(("app_called", scope["type"]))
+
+        middleware = server._BearerAuthMiddleware(app, {"expected-token": {"name": "admin"}})
+
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(message):
+            messages.append(message)
+
+        asyncio.run(
+            middleware(
+                {
+                    "type": "http",
+                    "method": "POST",
+                    "path": "/mcp",
+                    "client": ("127.0.0.1", 12345),
+                    "headers": [],
+                },
+                receive,
+                send,
+            )
+        )
+
+        self.assertNotIn(("app_called", "http"), messages)
+        self.assertEqual("http.response.start", messages[0]["type"])
+        self.assertEqual(401, messages[0]["status"])
+        self.assertIn((b"www-authenticate", b'Bearer realm="mcp-hub"'), messages[0]["headers"])
+
+    def test_http_mcp_request_validation_rejects_unknown_protocol_version(self) -> None:
+        error = server._validate_http_mcp_request(
+            {
+                "mcp-protocol-version": "2099-01-01",
+            },
+            b'{"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"list_hosts"}}',
+        )
+        self.assertIn("unsupported MCP protocol version", error)
+
+    def test_http_mcp_request_validation_rejects_mismatched_tool_name(self) -> None:
+        error = server._validate_http_mcp_request(
+            {
+                "mcp-method": "tools/call",
+                "mcp-name": "list_hosts",
+            },
+            b'{"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"topology"}}',
+        )
+        self.assertIn("Mcp-Name header does not match request body", error)
+
+    def test_http_mcp_request_validation_accepts_matching_tool_name(self) -> None:
+        error = server._validate_http_mcp_request(
+            {
+                "mcp-protocol-version": "2026-07-28",
+                "mcp-method": "tools/call",
+                "mcp-name": "list_hosts",
+            },
+            b'{"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"list_hosts"}}',
+        )
+        self.assertIsNone(error)
+
+    def test_http_mcp_request_validation_accepts_legacy_protocol_version(self) -> None:
+        error = server._validate_http_mcp_request(
+            {
+                "mcp-protocol-version": "2025-11-25",
+                "mcp-method": "tools/call",
+                "mcp-name": "list_hosts",
+            },
+            b'{"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"list_hosts"}}',
+        )
+        self.assertIsNone(error)
+
+    def test_http_mcp_request_validation_accepts_missing_mcp_headers(self) -> None:
+        error = server._validate_http_mcp_request(
+            {},
+            b'{"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"list_hosts"}}',
+        )
+        self.assertIsNone(error)
+
+    def test_http_bearer_auth_middleware_rejects_unknown_protocol_version(self) -> None:
+        messages = []
+
+        async def app(scope, receive, send):
+            messages.append(("app_called", scope["type"]))
+
+        middleware = server._BearerAuthMiddleware(app, {"expected-token": {"name": "admin"}})
+
+        async def receive():
+            return {
+                "type": "http.request",
+                "body": (
+                    b'{"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"list_hosts"}}'
+                ),
+                "more_body": False,
+            }
+
+        async def send(message):
+            messages.append(message)
+
+        asyncio.run(
+            middleware(
+                {
+                    "type": "http",
+                    "method": "POST",
+                    "path": "/mcp",
+                    "client": ("127.0.0.1", 12345),
+                    "headers": [
+                        (b"authorization", b"Bearer expected-token"),
+                        (b"mcp-protocol-version", b"2099-01-01"),
+                        (b"mcp-method", b"tools/call"),
+                        (b"mcp-name", b"list_hosts"),
+                    ],
+                },
+                receive,
+                send,
+            )
+        )
+
+        self.assertNotIn(("app_called", "http"), messages)
+        self.assertEqual("http.response.start", messages[0]["type"])
+        self.assertEqual(400, messages[0]["status"])
+
+    def test_http_bearer_auth_middleware_rejects_mismatched_mcp_name(self) -> None:
+        messages = []
+
+        async def app(scope, receive, send):
+            messages.append(("app_called", scope["type"]))
+
+        middleware = server._BearerAuthMiddleware(app, {"expected-token": {"name": "admin"}})
+
+        async def receive():
+            return {
+                "type": "http.request",
+                "body": (
+                    b'{"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"topology"}}'
+                ),
+                "more_body": False,
+            }
+
+        async def send(message):
+            messages.append(message)
+
+        asyncio.run(
+            middleware(
+                {
+                    "type": "http",
+                    "method": "POST",
+                    "path": "/mcp",
+                    "client": ("127.0.0.1", 12345),
+                    "headers": [
+                        (b"authorization", b"Bearer expected-token"),
+                        (b"mcp-protocol-version", b"2026-07-28"),
+                        (b"mcp-method", b"tools/call"),
+                        (b"mcp-name", b"list_hosts"),
+                    ],
+                },
+                receive,
+                send,
+            )
+        )
+
+        self.assertNotIn(("app_called", "http"), messages)
+        self.assertEqual("http.response.start", messages[0]["type"])
+        self.assertEqual(400, messages[0]["status"])
+
     def test_typed_environment_helpers(self) -> None:
         with mock.patch.dict(
             os.environ,
@@ -52,6 +223,25 @@ class CoreHelperTests(unittest.TestCase):
             self.assertTrue(config.env_bool("TEST_BOOL"))
             self.assertEqual(42, config.env_int("TEST_INT", 1))
             self.assertEqual(7, config.env_int("TEST_BAD_INT", 7))
+
+    def test_transport_selection_honors_cli_override(self) -> None:
+        with mock.patch.object(config, "TRANSPORT", "streamable-http"):
+            self.assertEqual("stdio", server._selected_transport(["--transport", "stdio"]))
+            self.assertEqual(
+                "streamable-http",
+                server._selected_transport(["--transport=streamable-http"]),
+            )
+
+    def test_main_can_start_stdio_transport(self) -> None:
+        with (
+            mock.patch.object(server, "sys") as sys_module,
+            mock.patch.object(server.mcp, "run") as run_mock,
+            mock.patch.object(server.config, "TRANSPORT", "streamable-http"),
+        ):
+            sys_module.argv = ["server.py", "--transport", "stdio"]
+            server.main()
+
+        run_mock.assert_called_once_with(transport="stdio")
 
     def test_access_profile_loading_and_target_restrictions(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -104,6 +294,18 @@ class CoreHelperTests(unittest.TestCase):
         with (
             mock.patch.object(config, "READ_ONLY", False),
             mock.patch.dict(server._mutating_functions, {"sample_mutation": sample_mutation}),
+            mock.patch.object(
+                server,
+                "_resource_limiter",
+                ResourceLimiter(
+                    requests_per_minute=120,
+                    max_argument_bytes=200_000,
+                    max_concurrent_per_target=4,
+                    circuit_failures=3,
+                    circuit_reset_seconds=60,
+                    mutation_cooldown_seconds=0,
+                ),
+            ),
         ):
             plan = asyncio.run(
                 server.plan_mutation(
@@ -115,12 +317,231 @@ class CoreHelperTests(unittest.TestCase):
             self.assertEqual(
                 "[REDACTED]", plan["data"]["arguments_preview"]["api_token"]
             )
+            self.assertEqual(token, plan["data"]["state_handle"])
             result = asyncio.run(server.confirm_mutation(token))
             replay = asyncio.run(server.confirm_mutation(token))
 
         self.assertEqual(["expected"], calls)
         self.assertEqual("executed", result["data"]["status"])
         self.assertIn("already used", replay["error"])
+
+    def test_sensitive_mutation_confirmation_token_is_persisted(self) -> None:
+        calls = []
+
+        async def sample_mutation(value: str) -> dict:
+            calls.append(value)
+            return {"value": value}
+
+        with (
+            mock.patch.object(config, "READ_ONLY", False),
+            mock.patch.dict(server._mutating_functions, {"sample_mutation": sample_mutation}),
+            mock.patch.object(
+                server,
+                "_resource_limiter",
+                ResourceLimiter(
+                    requests_per_minute=120,
+                    max_argument_bytes=200_000,
+                    max_concurrent_per_target=4,
+                    circuit_failures=3,
+                    circuit_reset_seconds=60,
+                    mutation_cooldown_seconds=0,
+                ),
+            ),
+        ):
+            plan = asyncio.run(server.plan_mutation("sample_mutation", {"value": "persisted"}))
+            token = plan["data"]["confirmation_token"]
+            self.assertEqual(token, plan["data"]["state_handle"])
+            original_store = server._pending_store
+            try:
+                server._pending_store = server.PendingOperationStore(server.STATE_DB)
+                result = asyncio.run(server.confirm_mutation(token))
+            finally:
+                server._pending_store = original_store
+
+        self.assertEqual(["persisted"], calls)
+        self.assertEqual("executed", result["data"]["status"])
+
+    def test_plan_mutation_supports_mrtr_confirmation(self) -> None:
+        calls = []
+
+        async def sample_mutation(value: str) -> dict:
+            calls.append(value)
+            return {"value": value}
+
+        with (
+            mock.patch.object(config, "READ_ONLY", False),
+            mock.patch.dict(server._mutating_functions, {"sample_mutation": sample_mutation}),
+            mock.patch.object(
+                server,
+                "_resource_limiter",
+                ResourceLimiter(
+                    requests_per_minute=120,
+                    max_argument_bytes=200_000,
+                    max_concurrent_per_target=4,
+                    circuit_failures=3,
+                    circuit_reset_seconds=60,
+                    mutation_cooldown_seconds=0,
+                ),
+            ),
+        ):
+            first = asyncio.run(
+                server.plan_mutation.__wrapped__(
+                    "sample_mutation",
+                    {"value": "mrtr"},
+                    ctx=SimpleNamespace(request_state=None, input_responses=None),
+                )
+            )
+            self.assertEqual("input_required", first.result_type)
+            token = first.request_state
+            self.assertIn(server._MRTR_CONFIRMATION_KEY, first.input_requests)
+            second = asyncio.run(
+                server.plan_mutation.__wrapped__(
+                    "sample_mutation",
+                    {"value": "mrtr"},
+                    ctx=SimpleNamespace(
+                        request_state=token,
+                        input_responses={
+                            server._MRTR_CONFIRMATION_KEY: {
+                                "action": "accept",
+                                "content": {"confirm": True},
+                            }
+                        },
+                    ),
+                )
+            )
+
+        self.assertEqual(["mrtr"], calls)
+        self.assertEqual("executed", second["status"])
+
+    def test_plan_mutation_mrtr_rejects_invalid_confirmation_response(self) -> None:
+        async def sample_mutation(value: str) -> dict:
+            return {"value": value}
+
+        with (
+            mock.patch.object(config, "READ_ONLY", False),
+            mock.patch.dict(server._mutating_functions, {"sample_mutation": sample_mutation}),
+        ):
+            first = asyncio.run(
+                server.plan_mutation.__wrapped__(
+                    "sample_mutation",
+                    {"value": "invalid"},
+                    ctx=SimpleNamespace(request_state=None, input_responses=None),
+                )
+            )
+            result = asyncio.run(
+                server.plan_mutation.__wrapped__(
+                    "sample_mutation",
+                    {"value": "invalid"},
+                    ctx=SimpleNamespace(
+                        request_state=first.request_state,
+                        input_responses={
+                            server._MRTR_CONFIRMATION_KEY: {
+                                "action": "accept",
+                                "content": {"confirm": False},
+                            }
+                        },
+                    ),
+                )
+            )
+
+        self.assertIn("confirm=true", result["error"])
+
+    def test_plan_mutation_mrtr_handles_decline_without_executing(self) -> None:
+        calls = []
+
+        async def sample_mutation(value: str) -> dict:
+            calls.append(value)
+            return {"value": value}
+
+        with (
+            mock.patch.object(config, "READ_ONLY", False),
+            mock.patch.dict(server._mutating_functions, {"sample_mutation": sample_mutation}),
+        ):
+            first = asyncio.run(
+                server.plan_mutation.__wrapped__(
+                    "sample_mutation",
+                    {"value": "declined"},
+                    ctx=SimpleNamespace(request_state=None, input_responses=None),
+                )
+            )
+            result = asyncio.run(
+                server.plan_mutation.__wrapped__(
+                    "sample_mutation",
+                    {"value": "declined"},
+                    ctx=SimpleNamespace(
+                        request_state=first.request_state,
+                        input_responses={
+                            server._MRTR_CONFIRMATION_KEY: {
+                                "action": "decline",
+                            }
+                        },
+                    ),
+                )
+            )
+            replay = asyncio.run(server.confirm_mutation(first.request_state))
+
+        self.assertEqual([], calls)
+        self.assertEqual("cancelled", result["status"])
+        self.assertIn("already used", replay["error"])
+
+    def test_plan_mutation_rejects_unknown_tool(self) -> None:
+        result = asyncio.run(server.plan_mutation("definitely_unknown_tool", {}))
+        self.assertIn("unknown or non-mutating tool", result["error"])
+
+    def test_plan_mutation_rejects_invalid_arguments(self) -> None:
+        async def sample_mutation(value: str) -> dict:
+            return {"value": value}
+
+        with mock.patch.dict(server._mutating_functions, {"sample_mutation": sample_mutation}):
+            result = asyncio.run(server.plan_mutation("sample_mutation", {}))
+        self.assertIn("invalid arguments", result["error"])
+
+    def test_confirm_mutation_rejects_expired_state_handle(self) -> None:
+        async def sample_mutation(value: str) -> dict:
+            return {"value": value}
+
+        with (
+            mock.patch.object(config, "READ_ONLY", False),
+            mock.patch.dict(server._mutating_functions, {"sample_mutation": sample_mutation}),
+        ):
+            plan = asyncio.run(server.plan_mutation("sample_mutation", {"value": "late"}))
+            token = plan["data"]["confirmation_token"]
+            with sqlite3.connect(server.STATE_DB) as connection:
+                connection.execute(
+                    "UPDATE pending_operation SET expires_at = ? WHERE token = ?",
+                    ("2000-01-01T00:00:00+00:00", token),
+                )
+            result = asyncio.run(server.confirm_mutation(token))
+
+        self.assertIn("invalid, expired, or already used", result["error"])
+
+    def test_destroy_resource_returns_state_handle_alias(self) -> None:
+        with (
+            mock.patch.object(config, "READ_ONLY", False),
+            mock.patch.object(
+                server,
+                "_ssh_run",
+                mock.AsyncMock(return_value={"return_code": 0, "stdout": "config", "stderr": ""}),
+            ),
+        ):
+            result = asyncio.run(server.destroy_resource.__wrapped__("ct", "101", host="prox"))
+        self.assertEqual(
+            result["state_handle"],
+            result["confirm_token"],
+        )
+
+    def test_destroy_resource_rejects_mismatched_handles(self) -> None:
+        with mock.patch.object(config, "READ_ONLY", False):
+            result = asyncio.run(
+                server.destroy_resource(
+                    "ct",
+                    "101",
+                    host="prox",
+                    confirm_token="one",
+                    state_handle="two",
+                )
+            )
+        self.assertIn("must match", result["error"])
 
     def test_direct_sensitive_mutation_is_refused_before_execution(self) -> None:
         with (
@@ -142,11 +563,70 @@ class CoreHelperTests(unittest.TestCase):
         self.assertEqual("list_hosts", result["tool"])
         self.assertEqual(24, len(result["request_id"]))
 
+    def test_http_request_log_fields_extract_mcp_headers(self) -> None:
+        fields = server._http_request_log_fields(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": "/mcp",
+                "client": ("127.0.0.1", 12345),
+                "headers": [
+                    (b"mcp-protocol-version", b"2026-07-28"),
+                    (b"mcp-method", b"tools/call"),
+                    (b"mcp-name", b"list_hosts"),
+                    (b"origin", b"https://example.test"),
+                ],
+            }
+        )
+        self.assertEqual("POST", fields["http_method"])
+        self.assertEqual("/mcp", fields["path"])
+        self.assertEqual("127.0.0.1", fields["client"])
+        self.assertEqual("2026-07-28", fields["mcp_protocol_version"])
+        self.assertEqual("tools/call", fields["mcp_method"])
+        self.assertEqual("list_hosts", fields["mcp_name"])
+        self.assertEqual("https://example.test", fields["origin"])
+
+    def test_limit_identity_includes_http_mcp_headers(self) -> None:
+        profile = {"_identity": "token-hash"}
+        method_token = server._current_http_mcp_method.set("tools/call")
+        name_token = server._current_http_mcp_name.set("list_hosts")
+        try:
+            identity = server._limit_identity(profile)
+        finally:
+            server._current_http_mcp_name.reset(name_token)
+            server._current_http_mcp_method.reset(method_token)
+        self.assertEqual("token-hash|tools/call|list_hosts", identity)
+
     def test_standardized_alias_reports_its_public_tool_name(self) -> None:
         result = asyncio.run(server.get_mcp_stats())
         self.assertTrue(result["ok"])
         self.assertEqual("get_mcp_stats", result["tool"])
         self.assertIn("stats", result["data"])
+
+    def test_list_tools_is_stable_between_identical_calls(self) -> None:
+        first = asyncio.run(server.mcp.list_tools())
+        second = asyncio.run(server.mcp.list_tools())
+        self.assertEqual(
+            [tool.name for tool in first],
+            [tool.name for tool in second],
+        )
+
+    def test_topology_reports_explicit_cache_metadata(self) -> None:
+        with (
+            mock.patch.object(server, "_TOPO_OVERLAY", {"guests": {"100": "example"}}),
+            mock.patch.object(server, "_hypervisor_hosts", return_value=[]),
+            mock.patch.object(server, "_kv_get", side_effect=[None, {"guests": {"100": "example"}}]),
+            mock.patch.object(server, "_kv_set"),
+        ):
+            first = asyncio.run(server.topology(refresh=False, live=False))["data"]
+            second = asyncio.run(server.topology(refresh=False, live=False))["data"]
+
+        self.assertEqual("miss", first["_cache"])
+        self.assertEqual("deployment", first["_cache_scope"])
+        self.assertEqual(server.TOPOLOGY_CACHE_TTL_SECONDS * 1000, first["_cache_ttl_ms"])
+        self.assertEqual("hit", second["_cache"])
+        self.assertEqual("deployment", second["_cache_scope"])
+        self.assertEqual(server.TOPOLOGY_CACHE_TTL_SECONDS * 1000, second["_cache_ttl_ms"])
 
     def test_audit_export_correlates_tool_calls(self) -> None:
         call = asyncio.run(server.list_hosts())

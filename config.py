@@ -76,6 +76,9 @@ LOG_FILE = env_path("MCP_LOG_FILE", str(HUB_HOME / "mcp-hub.log"))
 # =============================================================================
 # Default to loopback. Binding 0.0.0.0 publishes remote shell execution on the
 # local network; that has to be a deliberate act, not a default. See SECURITY.md.
+TRANSPORT = env("MCP_TRANSPORT", "streamable-http").strip().lower() or "streamable-http"
+if TRANSPORT not in {"streamable-http", "stdio"}:
+    TRANSPORT = "streamable-http"
 BIND_ADDR = env("MCP_BIND_ADDR", "127.0.0.1")
 PORT = env_int("MCP_PORT", 8000)
 

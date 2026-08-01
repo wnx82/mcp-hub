@@ -32,16 +32,21 @@ from mcp.types import ToolAnnotations
 
 try:
     from mcp.server.mcpserver import MCPServer as _MCPServer
+    from mcp.server.mcpserver.context import Context as MCPToolContext
+    from mcp.types import InputRequiredResult
 
     _MCP_SDK_V2 = True
 except ImportError:
     from mcp.server.fastmcp import FastMCP as _MCPServer
 
+    MCPToolContext = Any
+    InputRequiredResult = None
     _MCP_SDK_V2 = False
 
 import config
 from _version import __version__
 from core.limits import LimitLease, ResourceLimiter
+from core.pending import PendingOperationStore
 from core.snapshots import SnapshotStore
 from tools.cloudflare import (
     dns_records_path,
@@ -103,6 +108,7 @@ DEFAULT_TIMEOUT = config.DEFAULT_TIMEOUT
 MAX_TIMEOUT = config.MAX_TIMEOUT
 MAX_STDOUT_BYTES = config.MAX_STDOUT_BYTES
 MAX_STDERR_BYTES = config.MAX_STDERR_BYTES
+TOPOLOGY_CACHE_TTL_SECONDS = 600
 
 
 # --- Tracking du tool appelant (pour mcp_stats granulaire) ---
@@ -118,8 +124,13 @@ _confirmed_mutation: contextvars.ContextVar[bool] = contextvars.ContextVar(
 _current_request_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "request_id", default=None
 )
+_current_http_mcp_method: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "http_mcp_method", default=None
+)
+_current_http_mcp_name: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "http_mcp_name", default=None
+)
 _mutating_functions: dict[str, Any] = {}
-_pending_mutations: dict[str, dict[str, Any]] = {}
 _resource_limiter = ResourceLimiter(
     requests_per_minute=config.RATE_LIMIT_PER_MINUTE,
     max_argument_bytes=config.MAX_ARGUMENT_BYTES,
@@ -128,6 +139,15 @@ _resource_limiter = ResourceLimiter(
     circuit_reset_seconds=config.CIRCUIT_RESET_SECONDS,
     mutation_cooldown_seconds=config.MUTATION_COOLDOWN_SECONDS,
 )
+
+_MRTR_CONFIRMATION_KEY = "confirm"
+_SUPPORTED_PROTOCOL_VERSIONS = {
+    "2024-11-05",
+    "2025-03-26",
+    "2025-06-18",
+    "2025-11-25",
+    "2026-07-28",
+}
 
 
 # --- Logging ---
@@ -392,6 +412,10 @@ _snapshot_store = SnapshotStore(
     STATE_DB,
     retention_days=config.SNAPSHOT_RETENTION_DAYS,
 )
+_pending_store = PendingOperationStore(
+    STATE_DB,
+    retention_days=config.SNAPSHOT_RETENTION_DAYS,
+)
 
 _MCP_INSTRUCTIONS = (
     "Central infrastructure control hub. Runs shell commands on the hub "
@@ -421,6 +445,76 @@ def _streamable_http_kwargs() -> dict[str, Any]:
     }
 
 
+def _scope_headers(scope: dict[str, Any]) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    for key, value in scope.get("headers") or []:
+        try:
+            headers[key.decode("latin-1").lower()] = value.decode("latin-1")
+        except Exception:
+            continue
+    return headers
+
+
+def _http_request_log_fields(scope: dict[str, Any]) -> dict[str, str]:
+    headers = _scope_headers(scope)
+    client = scope.get("client") or ("", 0)
+    return {
+        "http_method": str(scope.get("method") or ""),
+        "path": str(scope.get("path") or ""),
+        "client": str(client[0] or ""),
+        "mcp_protocol_version": headers.get("mcp-protocol-version", ""),
+        "mcp_method": headers.get("mcp-method", ""),
+        "mcp_name": headers.get("mcp-name", ""),
+        "origin": headers.get("origin", ""),
+    }
+
+
+def _json_error_bytes(message: str) -> bytes:
+    return json.dumps({"error": message}, ensure_ascii=True).encode("utf-8")
+
+
+def _extract_mcp_request_name(method: str, payload: dict[str, Any]) -> str | None:
+    if payload.get("method") != method:
+        return None
+    params = payload.get("params")
+    if not isinstance(params, dict):
+        return None
+    if method in {"tools/call", "prompts/get"}:
+        name = params.get("name")
+        return name if isinstance(name, str) else None
+    if method == "resources/read":
+        uri = params.get("uri")
+        return uri if isinstance(uri, str) else None
+    return None
+
+
+def _validate_http_mcp_request(headers: dict[str, str], body: bytes) -> str | None:
+    protocol_version = headers.get("mcp-protocol-version")
+    if protocol_version and protocol_version not in _SUPPORTED_PROTOCOL_VERSIONS:
+        return f"unsupported MCP protocol version: {protocol_version}"
+
+    advertised_method = headers.get("mcp-method")
+    advertised_name = headers.get("mcp-name")
+    if not advertised_method and not advertised_name:
+        return None
+    if not body:
+        return None
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    body_method = payload.get("method")
+    if advertised_method and isinstance(body_method, str) and body_method != advertised_method:
+        return f"Mcp-Method header does not match request body: {advertised_method} != {body_method}"
+    if advertised_name and advertised_method:
+        body_name = _extract_mcp_request_name(advertised_method, payload)
+        if body_name is not None and body_name != advertised_name:
+            return f"Mcp-Name header does not match request body: {advertised_name} != {body_name}"
+    return None
+
+
 if _MCP_SDK_V2:
     mcp = _MCPServer(
         name="mcp-hub",
@@ -439,7 +533,7 @@ else:
 # MCP_READ_ONLY=true must neutralise every mutating tool. Rather than touching
 # 85 tool bodies, wrap the registration decorator once: any tool named in
 # config.MUTATING_TOOLS is replaced by a stub that refuses. functools.wraps
-# keeps __wrapped__ so FastMCP still derives the real schema from the original
+# keeps __wrapped__ so the MCP SDK still derives the real schema from the original
 # signature.
 _register_tool = mcp.tool
 
@@ -534,7 +628,12 @@ def _request_targets(fn, args, kwargs) -> set[str]:
 
 
 def _limit_identity(profile: dict[str, Any] | None) -> str:
-    return str((profile or {}).get("_identity") or (profile or {}).get("name") or "internal")
+    base = str((profile or {}).get("_identity") or (profile or {}).get("name") or "internal")
+    mcp_method = _current_http_mcp_method.get()
+    mcp_name = _current_http_mcp_name.get()
+    if not mcp_method:
+        return base
+    return f"{base}|{mcp_method}|{mcp_name or '-'}"
 
 
 def _response_envelope(
@@ -571,6 +670,8 @@ def _log_tool_audit(envelope: dict[str, Any]) -> None:
         "ok": envelope["ok"],
         "error": envelope["error"],
         "domain": domain_for_tool(envelope["tool"]),
+        "mcp_method": _current_http_mcp_method.get(),
+        "mcp_name": _current_http_mcp_name.get(),
         "data_type": type(data).__name__,
         "data_keys": sorted(data) if isinstance(data, dict) else [],
     }
@@ -3322,18 +3423,22 @@ _TOPO_OVERLAY = config.load_topology()
 @mcp.tool()
 async def topology(refresh: bool = False, live: bool = True) -> dict[str, Any]:
     """Return the canonical mapping of containers, addresses, roles, hosts, tunnels, and warnings."""
-    cached = None if refresh else _kv_get("topology", 600)
+    cached = None if refresh else _kv_get("topology", TOPOLOGY_CACHE_TTL_SECONDS)
     if cached and not refresh:
         cached["_cache"] = "hit"
+        cached["_cache_scope"] = "deployment"
+        cached["_cache_ttl_ms"] = TOPOLOGY_CACHE_TTL_SECONDS * 1000
         return cached
 
     result = {k: v for k, v in _TOPO_OVERLAY.items()}
     result["_generated"] = datetime.now(timezone.utc).isoformat()
     result["_cache"] = "miss"
+    result["_cache_scope"] = "deployment"
+    result["_cache_ttl_ms"] = TOPOLOGY_CACHE_TTL_SECONDS * 1000
 
     if live:
         listing = "pct list 2>/dev/null; echo '=== VM ==='; qm list 2>/dev/null"
-        for hv in _hypervisor_hosts():
+        for hv in sorted(_hypervisor_hosts()):
             try:
                 r = await _ssh_run(hv, listing, as_root=True, timeout=12)
                 if r.get("return_code") == 0:
@@ -3356,18 +3461,20 @@ async def get_topology(refresh: bool = False, live: bool = True) -> dict[str, An
 # ============================================================================
 # === 4. Garde destructif (suppression en 2 etapes) =========================
 # ============================================================================
-_PENDING_DESTROY: dict[str, dict] = {}
-
-
 @mcp.tool()
 async def destroy_resource(
     kind: str,
     ident: str,
     host: str = DEFAULT_HOST,
     confirm_token: Optional[str] = None,
+    state_handle: Optional[str] = None,
     purge: bool = False,
 ) -> dict[str, Any]:
-    """Destroy a Proxmox VM or container through a guarded two-step flow. The first call returns a short-lived confirmation token; the second applies the exact plan."""
+    """Destroy a Proxmox VM or container through a guarded two-step flow.
+
+    The first call returns an opaque short-lived state handle. `confirm_token`
+    is kept as a backward-compatible alias for older clients.
+    """
     kind = kind.lower()
     if kind not in ("ct", "vm"):
         return {"error": "kind doit etre 'ct' ou 'vm'"}
@@ -3375,20 +3482,22 @@ async def destroy_resource(
         vmid = int(ident)
     except Exception:
         return {"error": "ident doit etre un VMID numerique"}
+    if confirm_token and state_handle and confirm_token != state_handle:
+        return {"error": "confirm_token and state_handle must match when both are provided"}
+    confirmation_handle = state_handle or confirm_token
 
     # --- Etape 2 : confirmation ---
-    if confirm_token:
-        pend = _PENDING_DESTROY.get(confirm_token)
+    if confirmation_handle:
+        _purge_expired_pending_operations()
+        pending = _pending_store.get(confirmation_handle)
+        pend = None if pending is None or pending["kind"] != "destroy_resource" else pending["payload"]
         if not pend:
-            return {"error": "token inconnu ou expire ; relance sans token pour en obtenir un neuf"}
-        if _time.time() > pend["expires"]:
-            _PENDING_DESTROY.pop(confirm_token, None)
-            return {"error": "token expire (5 min) ; relance sans token"}
+            return {"error": "state handle inconnu ou expire ; relance sans handle pour en obtenir un neuf"}
         if (pend["kind"], pend["vmid"], pend["host"]) != (kind, vmid, host):
-            return {"error": "le token ne correspond pas a cette cible"}
+            return {"error": "le state handle ne correspond pas a cette cible"}
         verb = "pct" if kind == "ct" else "qm"
         cmd = "%s destroy %d%s" % (verb, vmid, " --purge" if pend["purge"] else "")
-        _PENDING_DESTROY.pop(confirm_token, None)
+        _pending_store.pop(confirmation_handle)
         res = await _with_tool("destroy_resource", _ssh_run(host, cmd, as_root=True, timeout=120))
         return {"executed": cmd, "host": host, "result": res}
 
@@ -3401,19 +3510,26 @@ async def destroy_resource(
     if info.get("return_code") != 0 or "does not exist" in (info.get("stdout", "") + info.get("stderr", "")):
         return {"error": "cible introuvable", "host": host, "kind": kind, "vmid": vmid,
                 "detail": info.get("stdout", "") + info.get("stderr", "")}
-    token = _uuid.uuid4().hex[:12]
-    _PENDING_DESTROY[token] = {
-        "kind": kind, "vmid": vmid, "host": host, "purge": purge,
-        "expires": _time.time() + 300,
-    }
+    token, ttl = _pending_store.create(
+        kind="destroy_resource",
+        profile=_profile_identity(_current_profile.get()),
+        payload={
+            "kind": kind,
+            "vmid": vmid,
+            "host": host,
+            "purge": purge,
+        },
+        ttl_seconds=300,
+    )
     return {
         "action": "CONFIRMATION REQUISE - rien detruit",
         "target": {"kind": kind, "vmid": vmid, "host": host, "purge": purge},
         "resolved": info.get("stdout", ""),
+        "state_handle": token,
         "confirm_token": token,
-        "how_to_confirm": "rappelle destroy_resource(kind='%s', ident='%d', host='%s', confirm_token='%s')"
+        "how_to_confirm": "rappelle destroy_resource(kind='%s', ident='%d', host='%s', state_handle='%s')"
                           % (kind, vmid, host, token),
-        "expires_in_seconds": 300,
+        "expires_in_seconds": ttl,
     }
 
 
@@ -3846,13 +3962,8 @@ def _profile_identity(profile: dict[str, Any] | None) -> str:
     return str(profile.get("_identity") or profile.get("name") or "unnamed")
 
 
-def _purge_expired_mutations() -> None:
-    now = time.monotonic()
-    for token in [
-        token for token, plan in _pending_mutations.items()
-        if plan["expires_at"] <= now
-    ]:
-        _pending_mutations.pop(token, None)
+def _purge_expired_pending_operations() -> None:
+    _pending_store.purge_expired()
 
 
 def _redacted_preview(value: Any, key: str = "") -> Any:
@@ -3869,6 +3980,111 @@ def _redacted_preview(value: Any, key: str = "") -> Any:
     if isinstance(value, str):
         return redact_str(value)
     return value
+
+
+def _supports_mrtr(ctx: MCPToolContext | None) -> bool:
+    return bool(_MCP_SDK_V2 and ctx is not None and InputRequiredResult is not None)
+
+
+def _pending_mutation_matches(
+    token: str,
+    tool: str,
+    arguments: dict[str, Any],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    _purge_expired_pending_operations()
+    pending = _pending_store.get(token)
+    if pending is None or pending["kind"] != "mutation_plan":
+        return None, {"error": "invalid, expired, or already used confirmation token"}
+    profile = _current_profile.get()
+    if pending["profile"] != _profile_identity(profile):
+        return None, {"error": "confirmation token belongs to a different access profile"}
+    payload = pending["payload"]
+    if payload["tool"] != tool or payload["arguments"] != dict(arguments):
+        return None, {"error": "request_state does not match this planned mutation"}
+    return pending, None
+
+
+def _extract_input_response_payload(response: Any) -> dict[str, Any] | None:
+    if response is None:
+        return None
+    payload = getattr(response, "root", response)
+    if isinstance(payload, dict) and "root" in payload and isinstance(payload["root"], dict):
+        payload = payload["root"]
+    return payload if isinstance(payload, dict) else None
+
+
+def _build_mutation_confirmation_input_required(
+    tool: str,
+    arguments: dict[str, Any],
+    token: str,
+    ttl: int,
+) -> InputRequiredResult:
+    preview = _redacted_preview(arguments)
+    return InputRequiredResult(
+        input_requests={
+            _MRTR_CONFIRMATION_KEY: {
+                "method": "elicitation/create",
+                "params": {
+                    "message": (
+                        f"Confirme l'execution de l'outil sensible '{tool}'. "
+                        f"Arguments: {json.dumps(preview, ensure_ascii=True, sort_keys=True)}. "
+                        f"Ce plan expire dans {ttl} secondes."
+                    ),
+                    "mode": "form",
+                    "requestedSchema": {
+                        "type": "object",
+                        "properties": {
+                            "confirm": {
+                                "type": "boolean",
+                                "description": "Mettre true pour executer cette mutation.",
+                            }
+                        },
+                        "required": ["confirm"],
+                    },
+                },
+            }
+        },
+        request_state=token,
+    )
+
+
+async def _execute_planned_mutation(confirmation_token: str) -> dict[str, Any]:
+    pending = _pending_store.get(confirmation_token)
+    if pending is None or pending["kind"] != "mutation_plan":
+        return {"error": "invalid, expired, or already used confirmation token"}
+    plan = pending["payload"]
+    profile = _current_profile.get()
+    if pending["profile"] != _profile_identity(profile):
+        return {"error": "confirmation token belongs to a different access profile"}
+    if config.READ_ONLY:
+        return {"error": "refused: MCP Hub is in read-only mode"}
+    fn = _mutating_functions.get(plan["tool"])
+    if fn is None:
+        return {"error": "planned tool is no longer available", "tool": plan["tool"]}
+    refusal = _access_refusal(profile, fn, (), plan["arguments"])
+    if refusal:
+        return refusal
+    lease, limit_error = _resource_limiter.acquire(
+        identity=_limit_identity(profile),
+        arguments={"kwargs": plan["arguments"]},
+        targets=_request_targets(fn, (), plan["arguments"]),
+        mutating=True,
+    )
+    if limit_error is not None:
+        return {"error": limit_error, "tool": plan["tool"]}
+    _pending_store.pop(confirmation_token)
+    context_token = _confirmed_mutation.set(True)
+    try:
+        result = fn(**plan["arguments"])
+        result = await result if inspect.isawaitable(result) else result
+        succeeded = not (isinstance(result, dict) and result.get("error") is not None)
+        _resource_limiter.release(lease, succeeded=succeeded)
+        lease = None
+    finally:
+        if lease is not None:
+            _resource_limiter.release(lease, succeeded=False)
+        _confirmed_mutation.reset(context_token)
+    return {"status": "executed", "tool": plan["tool"], "result": result}
 
 
 async def _apply_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -3955,9 +4171,12 @@ async def rollback_change(change_id: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-def plan_mutation(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Create a short-lived, one-time confirmation plan for an exact mutating tool call."""
-    _purge_expired_mutations()
+async def plan_mutation(
+    tool: str,
+    arguments: dict[str, Any],
+    ctx: MCPToolContext | None = None,
+) -> dict[str, Any] | InputRequiredResult:
+    """Create a short-lived mutation confirmation plan or resolve it through MRTR."""
     fn = _mutating_functions.get(tool)
     if fn is None:
         return {"error": "unknown or non-mutating tool", "tool": tool}
@@ -3970,18 +4189,42 @@ def plan_mutation(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
     refusal = _access_refusal(profile, fn, (), bound.arguments)
     if refusal:
         return refusal
-    token = secrets.token_urlsafe(24)
+    if _supports_mrtr(ctx) and ctx.request_state:
+        _, pending_error = _pending_mutation_matches(ctx.request_state, tool, arguments)
+        if pending_error:
+            return pending_error
+        responses = ctx.input_responses or {}
+        response = _extract_input_response_payload(responses.get(_MRTR_CONFIRMATION_KEY))
+        if response is None:
+            return {"error": "missing inputResponses for MRTR confirmation"}
+        action = response.get("action")
+        if action in {"decline", "cancel"}:
+            _pending_store.pop(ctx.request_state)
+            return {"status": "cancelled", "tool": tool, "reason": action}
+        if action != "accept":
+            return {"error": "unsupported elicitation response", "tool": tool}
+        content = response.get("content")
+        if not isinstance(content, dict) or content.get("confirm") is not True:
+            return {"error": "confirmation response must set confirm=true", "tool": tool}
+        return await _execute_planned_mutation(ctx.request_state)
+    _purge_expired_pending_operations()
     ttl = max(30, min(config.CONFIRMATION_TTL_SECONDS, 900))
-    _pending_mutations[token] = {
-        "tool": tool,
-        "arguments": dict(arguments),
-        "profile": _profile_identity(profile),
-        "expires_at": time.monotonic() + ttl,
-    }
+    token, ttl = _pending_store.create(
+        kind="mutation_plan",
+        profile=_profile_identity(profile),
+        payload={
+            "tool": tool,
+            "arguments": dict(arguments),
+        },
+        ttl_seconds=ttl,
+    )
+    if _supports_mrtr(ctx):
+        return _build_mutation_confirmation_input_required(tool, arguments, token, ttl)
     return {
         "status": "confirmation_required",
         "tool": tool,
         "arguments_preview": _redacted_preview(arguments),
+        "state_handle": token,
         "confirmation_token": token,
         "expires_in_seconds": ttl,
         "warning": "confirm_mutation will execute this exact call once",
@@ -3990,43 +4233,9 @@ def plan_mutation(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
 
 @mcp.tool()
 async def confirm_mutation(confirmation_token: str) -> dict[str, Any]:
-    """Execute one previously planned mutation and consume its confirmation token."""
-    _purge_expired_mutations()
-    plan = _pending_mutations.get(confirmation_token)
-    if plan is None:
-        return {"error": "invalid, expired, or already used confirmation token"}
-    profile = _current_profile.get()
-    if plan["profile"] != _profile_identity(profile):
-        return {"error": "confirmation token belongs to a different access profile"}
-    if config.READ_ONLY:
-        return {"error": "refused: MCP Hub is in read-only mode"}
-    fn = _mutating_functions.get(plan["tool"])
-    if fn is None:
-        return {"error": "planned tool is no longer available", "tool": plan["tool"]}
-    refusal = _access_refusal(profile, fn, (), plan["arguments"])
-    if refusal:
-        return refusal
-    lease, limit_error = _resource_limiter.acquire(
-        identity=_limit_identity(profile),
-        arguments={"kwargs": plan["arguments"]},
-        targets=_request_targets(fn, (), plan["arguments"]),
-        mutating=True,
-    )
-    if limit_error is not None:
-        return {"error": limit_error, "tool": plan["tool"]}
-    _pending_mutations.pop(confirmation_token, None)
-    context_token = _confirmed_mutation.set(True)
-    try:
-        result = fn(**plan["arguments"])
-        result = await result if inspect.isawaitable(result) else result
-        succeeded = not (isinstance(result, dict) and result.get("error") is not None)
-        _resource_limiter.release(lease, succeeded=succeeded)
-        lease = None
-    finally:
-        if lease is not None:
-            _resource_limiter.release(lease, succeeded=False)
-        _confirmed_mutation.reset(context_token)
-    return {"status": "executed", "tool": plan["tool"], "result": result}
+    """Execute one previously planned mutation from its opaque state handle."""
+    _purge_expired_pending_operations()
+    return await _execute_planned_mutation(confirmation_token)
 
 
 # ============================================================================
@@ -4043,11 +4252,52 @@ class _BearerAuthMiddleware:
         self.app = app
         self._profiles = profiles
 
+    async def _read_body(self, receive) -> bytes:
+        chunks: list[bytes] = []
+        more_body = True
+        while more_body:
+            message = await receive()
+            if message["type"] != "http.request":
+                continue
+            chunks.append(message.get("body", b""))
+            more_body = bool(message.get("more_body"))
+        return b"".join(chunks)
+
+    async def _send_json_error(self, send, status: int, message: str) -> None:
+        body = _json_error_bytes(message)
+        await send({
+            "type": "http.response.start",
+            "status": status,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode()),
+            ],
+        })
+        await send({"type": "http.response.body", "body": body})
+
     async def __call__(self, scope, receive, send):
         if scope.get("type") != "http":
             return await self.app(scope, receive, send)
-        headers = dict(scope.get("headers") or [])
-        provided = headers.get(b"authorization", b"").decode("latin-1")
+        fields = _http_request_log_fields(scope)
+        headers = _scope_headers(scope)
+        body = await self._read_body(receive)
+        validation_error = _validate_http_mcp_request(headers, body)
+        if validation_error is not None:
+            log.info(
+                "http request rejected method=%s path=%s client=%s profile=invalid "
+                "mcp_protocol=%s mcp_method=%s mcp_name=%s origin=%s reason=%s",
+                fields["http_method"],
+                fields["path"],
+                fields["client"],
+                fields["mcp_protocol_version"] or "-",
+                fields["mcp_method"] or "-",
+                fields["mcp_name"] or "-",
+                fields["origin"] or "-",
+                validation_error,
+            )
+            await self._send_json_error(send, 400, validation_error)
+            return
+        provided = headers.get("authorization", "")
         token = provided[7:] if provided.startswith("Bearer ") else ""
         profile = next(
             (
@@ -4058,7 +4308,18 @@ class _BearerAuthMiddleware:
             None,
         )
         if profile is None:
-            body = b'{"error": "unauthorized"}'
+            log.info(
+                "http request method=%s path=%s client=%s profile=unauthorized "
+                "mcp_protocol=%s mcp_method=%s mcp_name=%s origin=%s",
+                fields["http_method"],
+                fields["path"],
+                fields["client"],
+                fields["mcp_protocol_version"] or "-",
+                fields["mcp_method"] or "-",
+                fields["mcp_name"] or "-",
+                fields["origin"] or "-",
+            )
+            body = _json_error_bytes("unauthorized")
             await send({
                 "type": "http.response.start",
                 "status": 401,
@@ -4071,10 +4332,49 @@ class _BearerAuthMiddleware:
             await send({"type": "http.response.body", "body": body})
             return
         context_token = _current_profile.set(profile)
+        method_token = _current_http_mcp_method.set(fields["mcp_method"] or None)
+        name_token = _current_http_mcp_name.set(fields["mcp_name"] or None)
         try:
-            await self.app(scope, receive, send)
+            log.info(
+                "http request method=%s path=%s client=%s profile=%s "
+                "mcp_protocol=%s mcp_method=%s mcp_name=%s origin=%s",
+                fields["http_method"],
+                fields["path"],
+                fields["client"],
+                str(profile.get("name") or "unnamed"),
+                fields["mcp_protocol_version"] or "-",
+                fields["mcp_method"] or "-",
+                fields["mcp_name"] or "-",
+                fields["origin"] or "-",
+            )
+            sent = False
+
+            async def replay_receive():
+                nonlocal sent
+                if sent:
+                    return {"type": "http.request", "body": b"", "more_body": False}
+                sent = True
+                return {"type": "http.request", "body": body, "more_body": False}
+
+            await self.app(scope, replay_receive, send)
         finally:
+            _current_http_mcp_name.reset(name_token)
+            _current_http_mcp_method.reset(method_token)
             _current_profile.reset(context_token)
+
+
+def _selected_transport(argv: list[str] | None = None) -> str:
+    args = list(sys.argv[1:] if argv is None else argv)
+    for index, value in enumerate(args):
+        if value == "--transport" and index + 1 < len(args):
+            candidate = args[index + 1].strip().lower()
+            if candidate in {"streamable-http", "stdio"}:
+                return candidate
+        if value.startswith("--transport="):
+            candidate = value.split("=", 1)[1].strip().lower()
+            if candidate in {"streamable-http", "stdio"}:
+                return candidate
+    return config.TRANSPORT
 
 
 def main() -> None:
@@ -4083,6 +4383,11 @@ def main() -> None:
         return
 
     log.info("mcp-hub %s starting", __version__)
+    transport = _selected_transport()
+    if transport == "stdio":
+        log.info("starting MCP Hub on stdio transport")
+        mcp.run(transport="stdio")
+        return
     profiles = config.load_access_profiles()
     if config.AUTH_TOKEN:
         profiles.setdefault(config.AUTH_TOKEN, {

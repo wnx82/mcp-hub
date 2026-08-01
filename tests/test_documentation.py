@@ -82,6 +82,24 @@ class DocumentationTests(unittest.TestCase):
         self.assertTrue((ROOT / "docs" / "testing-local.md").is_file())
         self.assertTrue((ROOT / "docs" / "docker-packaging.md").is_file())
 
+    def test_http_transport_doc_exists_and_mentions_required_headers(self) -> None:
+        guide = (ROOT / "docs" / "http-transport-2026-07-28.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("MCP-Protocol-Version", guide)
+        self.assertIn("Mcp-Method", guide)
+        self.assertIn("Mcp-Name", guide)
+        self.assertIn("sticky-session", guide)
+
+    def test_migration_guide_covers_matrix_and_rollback(self) -> None:
+        guide = (ROOT / "docs" / "migration" / "mcp-2026-07-28-guide.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Compatibility matrix", guide)
+        self.assertIn("Rollback procedure", guide)
+        self.assertIn("stdio", guide)
+        self.assertIn("Claude Desktop", guide)
+
     def test_generated_tool_reference_is_current(self) -> None:
         result = subprocess.run(
             ["python3", "scripts/generate_tool_reference.py", "--check"],
