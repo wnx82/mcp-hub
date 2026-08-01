@@ -9,6 +9,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from core.limits import ResourceLimiter
+
 HUB_DEPENDENCIES_AVAILABLE = all(
     importlib.util.find_spec(name) is not None for name in ("mcp", "httpx", "yaml")
 )
@@ -104,6 +106,18 @@ class CoreHelperTests(unittest.TestCase):
         with (
             mock.patch.object(config, "READ_ONLY", False),
             mock.patch.dict(server._mutating_functions, {"sample_mutation": sample_mutation}),
+            mock.patch.object(
+                server,
+                "_resource_limiter",
+                ResourceLimiter(
+                    requests_per_minute=120,
+                    max_argument_bytes=200_000,
+                    max_concurrent_per_target=4,
+                    circuit_failures=3,
+                    circuit_reset_seconds=60,
+                    mutation_cooldown_seconds=0,
+                ),
+            ),
         ):
             plan = asyncio.run(
                 server.plan_mutation(
@@ -121,6 +135,41 @@ class CoreHelperTests(unittest.TestCase):
         self.assertEqual(["expected"], calls)
         self.assertEqual("executed", result["data"]["status"])
         self.assertIn("already used", replay["error"])
+
+    def test_sensitive_mutation_confirmation_token_is_persisted(self) -> None:
+        calls = []
+
+        async def sample_mutation(value: str) -> dict:
+            calls.append(value)
+            return {"value": value}
+
+        with (
+            mock.patch.object(config, "READ_ONLY", False),
+            mock.patch.dict(server._mutating_functions, {"sample_mutation": sample_mutation}),
+            mock.patch.object(
+                server,
+                "_resource_limiter",
+                ResourceLimiter(
+                    requests_per_minute=120,
+                    max_argument_bytes=200_000,
+                    max_concurrent_per_target=4,
+                    circuit_failures=3,
+                    circuit_reset_seconds=60,
+                    mutation_cooldown_seconds=0,
+                ),
+            ),
+        ):
+            plan = asyncio.run(server.plan_mutation("sample_mutation", {"value": "persisted"}))
+            token = plan["data"]["confirmation_token"]
+            original_store = server._pending_store
+            try:
+                server._pending_store = server.PendingOperationStore(server.STATE_DB)
+                result = asyncio.run(server.confirm_mutation(token))
+            finally:
+                server._pending_store = original_store
+
+        self.assertEqual(["persisted"], calls)
+        self.assertEqual("executed", result["data"]["status"])
 
     def test_direct_sensitive_mutation_is_refused_before_execution(self) -> None:
         with (

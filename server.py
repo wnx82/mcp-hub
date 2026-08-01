@@ -42,6 +42,7 @@ except ImportError:
 import config
 from _version import __version__
 from core.limits import LimitLease, ResourceLimiter
+from core.pending import PendingOperationStore
 from core.snapshots import SnapshotStore
 from tools.cloudflare import (
     dns_records_path,
@@ -119,7 +120,6 @@ _current_request_id: contextvars.ContextVar[str | None] = contextvars.ContextVar
     "request_id", default=None
 )
 _mutating_functions: dict[str, Any] = {}
-_pending_mutations: dict[str, dict[str, Any]] = {}
 _resource_limiter = ResourceLimiter(
     requests_per_minute=config.RATE_LIMIT_PER_MINUTE,
     max_argument_bytes=config.MAX_ARGUMENT_BYTES,
@@ -392,6 +392,10 @@ _snapshot_store = SnapshotStore(
     STATE_DB,
     retention_days=config.SNAPSHOT_RETENTION_DAYS,
 )
+_pending_store = PendingOperationStore(
+    STATE_DB,
+    retention_days=config.SNAPSHOT_RETENTION_DAYS,
+)
 
 _MCP_INSTRUCTIONS = (
     "Central infrastructure control hub. Runs shell commands on the hub "
@@ -439,7 +443,7 @@ else:
 # MCP_READ_ONLY=true must neutralise every mutating tool. Rather than touching
 # 85 tool bodies, wrap the registration decorator once: any tool named in
 # config.MUTATING_TOOLS is replaced by a stub that refuses. functools.wraps
-# keeps __wrapped__ so FastMCP still derives the real schema from the original
+# keeps __wrapped__ so the MCP SDK still derives the real schema from the original
 # signature.
 _register_tool = mcp.tool
 
@@ -3356,9 +3360,6 @@ async def get_topology(refresh: bool = False, live: bool = True) -> dict[str, An
 # ============================================================================
 # === 4. Garde destructif (suppression en 2 etapes) =========================
 # ============================================================================
-_PENDING_DESTROY: dict[str, dict] = {}
-
-
 @mcp.tool()
 async def destroy_resource(
     kind: str,
@@ -3378,17 +3379,16 @@ async def destroy_resource(
 
     # --- Etape 2 : confirmation ---
     if confirm_token:
-        pend = _PENDING_DESTROY.get(confirm_token)
+        _purge_expired_pending_operations()
+        pending = _pending_store.get(confirm_token)
+        pend = None if pending is None or pending["kind"] != "destroy_resource" else pending["payload"]
         if not pend:
             return {"error": "token inconnu ou expire ; relance sans token pour en obtenir un neuf"}
-        if _time.time() > pend["expires"]:
-            _PENDING_DESTROY.pop(confirm_token, None)
-            return {"error": "token expire (5 min) ; relance sans token"}
         if (pend["kind"], pend["vmid"], pend["host"]) != (kind, vmid, host):
             return {"error": "le token ne correspond pas a cette cible"}
         verb = "pct" if kind == "ct" else "qm"
         cmd = "%s destroy %d%s" % (verb, vmid, " --purge" if pend["purge"] else "")
-        _PENDING_DESTROY.pop(confirm_token, None)
+        _pending_store.pop(confirm_token)
         res = await _with_tool("destroy_resource", _ssh_run(host, cmd, as_root=True, timeout=120))
         return {"executed": cmd, "host": host, "result": res}
 
@@ -3401,11 +3401,17 @@ async def destroy_resource(
     if info.get("return_code") != 0 or "does not exist" in (info.get("stdout", "") + info.get("stderr", "")):
         return {"error": "cible introuvable", "host": host, "kind": kind, "vmid": vmid,
                 "detail": info.get("stdout", "") + info.get("stderr", "")}
-    token = _uuid.uuid4().hex[:12]
-    _PENDING_DESTROY[token] = {
-        "kind": kind, "vmid": vmid, "host": host, "purge": purge,
-        "expires": _time.time() + 300,
-    }
+    token, ttl = _pending_store.create(
+        kind="destroy_resource",
+        profile=_profile_identity(_current_profile.get()),
+        payload={
+            "kind": kind,
+            "vmid": vmid,
+            "host": host,
+            "purge": purge,
+        },
+        ttl_seconds=300,
+    )
     return {
         "action": "CONFIRMATION REQUISE - rien detruit",
         "target": {"kind": kind, "vmid": vmid, "host": host, "purge": purge},
@@ -3413,7 +3419,7 @@ async def destroy_resource(
         "confirm_token": token,
         "how_to_confirm": "rappelle destroy_resource(kind='%s', ident='%d', host='%s', confirm_token='%s')"
                           % (kind, vmid, host, token),
-        "expires_in_seconds": 300,
+        "expires_in_seconds": ttl,
     }
 
 
@@ -3846,13 +3852,8 @@ def _profile_identity(profile: dict[str, Any] | None) -> str:
     return str(profile.get("_identity") or profile.get("name") or "unnamed")
 
 
-def _purge_expired_mutations() -> None:
-    now = time.monotonic()
-    for token in [
-        token for token, plan in _pending_mutations.items()
-        if plan["expires_at"] <= now
-    ]:
-        _pending_mutations.pop(token, None)
+def _purge_expired_pending_operations() -> None:
+    _pending_store.purge_expired()
 
 
 def _redacted_preview(value: Any, key: str = "") -> Any:
@@ -3957,7 +3958,7 @@ async def rollback_change(change_id: str) -> dict[str, Any]:
 @mcp.tool()
 def plan_mutation(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """Create a short-lived, one-time confirmation plan for an exact mutating tool call."""
-    _purge_expired_mutations()
+    _purge_expired_pending_operations()
     fn = _mutating_functions.get(tool)
     if fn is None:
         return {"error": "unknown or non-mutating tool", "tool": tool}
@@ -3970,14 +3971,16 @@ def plan_mutation(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
     refusal = _access_refusal(profile, fn, (), bound.arguments)
     if refusal:
         return refusal
-    token = secrets.token_urlsafe(24)
     ttl = max(30, min(config.CONFIRMATION_TTL_SECONDS, 900))
-    _pending_mutations[token] = {
-        "tool": tool,
-        "arguments": dict(arguments),
-        "profile": _profile_identity(profile),
-        "expires_at": time.monotonic() + ttl,
-    }
+    token, ttl = _pending_store.create(
+        kind="mutation_plan",
+        profile=_profile_identity(profile),
+        payload={
+            "tool": tool,
+            "arguments": dict(arguments),
+        },
+        ttl_seconds=ttl,
+    )
     return {
         "status": "confirmation_required",
         "tool": tool,
@@ -3991,12 +3994,13 @@ def plan_mutation(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
 @mcp.tool()
 async def confirm_mutation(confirmation_token: str) -> dict[str, Any]:
     """Execute one previously planned mutation and consume its confirmation token."""
-    _purge_expired_mutations()
-    plan = _pending_mutations.get(confirmation_token)
-    if plan is None:
+    _purge_expired_pending_operations()
+    pending = _pending_store.get(confirmation_token)
+    if pending is None or pending["kind"] != "mutation_plan":
         return {"error": "invalid, expired, or already used confirmation token"}
+    plan = pending["payload"]
     profile = _current_profile.get()
-    if plan["profile"] != _profile_identity(profile):
+    if pending["profile"] != _profile_identity(profile):
         return {"error": "confirmation token belongs to a different access profile"}
     if config.READ_ONLY:
         return {"error": "refused: MCP Hub is in read-only mode"}
@@ -4014,7 +4018,7 @@ async def confirm_mutation(confirmation_token: str) -> dict[str, Any]:
     )
     if limit_error is not None:
         return {"error": limit_error, "tool": plan["tool"]}
-    _pending_mutations.pop(confirmation_token, None)
+    _pending_store.pop(confirmation_token)
     context_token = _confirmed_mutation.set(True)
     try:
         result = fn(**plan["arguments"])
