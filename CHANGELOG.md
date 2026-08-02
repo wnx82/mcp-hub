@@ -20,6 +20,27 @@ Fixed / Security.
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-08-02
+
+### Added
+
+- A repository-local MCP integration validation note now records which
+  multi-instance, read-only, timeout, and transport checks are proven directly
+  by the tracked test suite.
+- A read-only smoke test now invokes every registered read-only MCP tool in a
+  degraded environment and verifies it returns a structured result instead of
+  crashing.
+
+### Changed
+
+- The MCP migration roadmap now marks the repository-local validation steps
+  that are actually complete and leaves operator-only checks open.
+- MRTR compatibility tests now accept both the modern `input_required` flow
+  and the fallback confirmation-token flow exposed by the supported MCP
+  runtimes.
+- GitHub Actions workflows are now explicitly disabled in-repo so pushes on
+  `main` no longer trigger the current CI and release jobs.
+
 ## [0.4.1] - 2026-08-01
 
 ### Added

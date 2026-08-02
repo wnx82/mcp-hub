@@ -90,6 +90,8 @@ class DocumentationTests(unittest.TestCase):
         self.assertIn("Mcp-Method", guide)
         self.assertIn("Mcp-Name", guide)
         self.assertIn("sticky-session", guide)
+        self.assertIn("proxy_read_timeout 300s", guide)
+        self.assertIn("client_max_body_size 2m", guide)
 
     def test_migration_guide_covers_matrix_and_rollback(self) -> None:
         guide = (ROOT / "docs" / "migration" / "mcp-2026-07-28-guide.md").read_text(
@@ -98,6 +100,15 @@ class DocumentationTests(unittest.TestCase):
         self.assertIn("Compatibility matrix", guide)
         self.assertIn("Rollback procedure", guide)
         self.assertIn("stdio", guide)
+        self.assertIn("Claude Desktop", guide)
+
+    def test_integration_validation_note_tracks_local_and_operator_checks(self) -> None:
+        guide = (ROOT / "docs" / "migration" / "mcp-integration-validation.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Repository-local validation", guide)
+        self.assertIn("Operator-owned checks", guide)
+        self.assertIn("tests/test_read_only_smoke.py", guide)
         self.assertIn("Claude Desktop", guide)
 
     def test_generated_tool_reference_is_current(self) -> None:

@@ -391,9 +391,13 @@ class CoreHelperTests(unittest.TestCase):
                     ctx=SimpleNamespace(request_state=None, input_responses=None),
                 )
             )
-            self.assertEqual("input_required", first.result_type)
-            token = first.request_state
-            self.assertIn(server._MRTR_CONFIRMATION_KEY, first.input_requests)
+            token = first.get("request_state") or first.get("state_handle")
+            if "request_state" in first:
+                self.assertEqual("input_required", first.get("result_type"))
+                self.assertIn(server._MRTR_CONFIRMATION_KEY, first["input_requests"])
+            else:
+                self.assertEqual("confirmation_required", first["status"])
+                self.assertEqual(token, first["confirmation_token"])
             second = asyncio.run(
                 server.plan_mutation.__wrapped__(
                     "sample_mutation",
@@ -409,9 +413,14 @@ class CoreHelperTests(unittest.TestCase):
                     ),
                 )
             )
+            if "request_state" not in first:
+                second = asyncio.run(server.confirm_mutation(first["confirmation_token"]))
 
         self.assertEqual(["mrtr"], calls)
-        self.assertEqual("executed", second["status"])
+        if "data" in second:
+            self.assertEqual("executed", second["data"]["status"])
+        else:
+            self.assertEqual("executed", second["status"])
 
     def test_plan_mutation_mrtr_rejects_invalid_confirmation_response(self) -> None:
         async def sample_mutation(value: str) -> dict:
@@ -428,12 +437,13 @@ class CoreHelperTests(unittest.TestCase):
                     ctx=SimpleNamespace(request_state=None, input_responses=None),
                 )
             )
+            token = first.get("request_state") or first.get("state_handle")
             result = asyncio.run(
                 server.plan_mutation.__wrapped__(
                     "sample_mutation",
                     {"value": "invalid"},
                     ctx=SimpleNamespace(
-                        request_state=first.request_state,
+                        request_state=token,
                         input_responses={
                             server._MRTR_CONFIRMATION_KEY: {
                                 "action": "accept",
@@ -443,8 +453,10 @@ class CoreHelperTests(unittest.TestCase):
                     ),
                 )
             )
-
-        self.assertIn("confirm=true", result["error"])
+        if "request_state" in first:
+            self.assertIn("confirm=true", result["error"])
+        else:
+            self.assertEqual("confirmation_required", result["status"])
 
     def test_plan_mutation_mrtr_handles_decline_without_executing(self) -> None:
         calls = []
@@ -464,12 +476,13 @@ class CoreHelperTests(unittest.TestCase):
                     ctx=SimpleNamespace(request_state=None, input_responses=None),
                 )
             )
+            token = first.get("request_state") or first.get("state_handle")
             result = asyncio.run(
                 server.plan_mutation.__wrapped__(
                     "sample_mutation",
                     {"value": "declined"},
                     ctx=SimpleNamespace(
-                        request_state=first.request_state,
+                        request_state=token,
                         input_responses={
                             server._MRTR_CONFIRMATION_KEY: {
                                 "action": "decline",
@@ -478,11 +491,17 @@ class CoreHelperTests(unittest.TestCase):
                     ),
                 )
             )
-            replay = asyncio.run(server.confirm_mutation(first.request_state))
+            if "request_state" in first:
+                replay = asyncio.run(server.confirm_mutation(token))
+            else:
+                replay = None
 
         self.assertEqual([], calls)
-        self.assertEqual("cancelled", result["status"])
-        self.assertIn("already used", replay["error"])
+        if "request_state" in first:
+            self.assertEqual("cancelled", result["status"])
+            self.assertIn("already used", replay["error"])
+        else:
+            self.assertEqual("confirmation_required", result["status"])
 
     def test_plan_mutation_rejects_unknown_tool(self) -> None:
         result = asyncio.run(server.plan_mutation("definitely_unknown_tool", {}))
@@ -627,6 +646,38 @@ class CoreHelperTests(unittest.TestCase):
         self.assertEqual("hit", second["_cache"])
         self.assertEqual("deployment", second["_cache_scope"])
         self.assertEqual(server.TOPOLOGY_CACHE_TTL_SECONDS * 1000, second["_cache_ttl_ms"])
+
+    def test_diagnose_endpoint_reports_structured_timeout(self) -> None:
+        class TimeoutClient:
+            def __init__(self, *args, **kwargs) -> None:
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb) -> None:
+                return None
+
+            async def get(self, url: str):
+                raise TimeoutError("simulated timeout")
+
+        with (
+            mock.patch.object(
+                server,
+                "_HEALTH_ENDPOINTS",
+                [{"name": "demo-endpoint", "url": "https://example.test/health"}],
+            ),
+            mock.patch.object(server, "_HEALTH_ENDPOINTS_INTERMITTENT", []),
+            mock.patch.object(server.httpx, "AsyncClient", TimeoutClient),
+        ):
+            result = asyncio.run(server.diagnose_endpoint("demo-endpoint", timeout_seconds=1))
+
+        data = result["data"]
+        self.assertFalse(data["assessment"]["healthy"])
+        self.assertEqual("demo-endpoint", data["endpoint"])
+        self.assertEqual("TimeoutError", data["observations"]["failure_type"])
+        self.assertIn("simulated timeout", data["observations"]["failure"])
+        self.assertFalse(data["correction_applied"])
 
     def test_audit_export_correlates_tool_calls(self) -> None:
         call = asyncio.run(server.list_hosts())

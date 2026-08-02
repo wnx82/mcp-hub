@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   package:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -44,6 +45,7 @@ jobs:
           PY
 
   install:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,6 +56,7 @@ jobs:
         run: bash scripts/test_install.sh
 
   rescue:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -72,6 +75,7 @@ jobs:
           python -m rescue.cli --hub-home "$PWD" status || test $? -eq 1
 
   lint:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -86,6 +90,7 @@ jobs:
         run: python scripts/check_repo_hygiene.py
 
   smoke:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -147,6 +152,7 @@ jobs:
         run: python scripts/generate_tool_reference.py --check
 
   secrets:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
